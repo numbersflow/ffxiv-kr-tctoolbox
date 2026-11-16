@@ -25,6 +25,10 @@ internal sealed partial class HarvestService
             if (r.TryGetProperty("Character", out var character) && character.GetUInt64() != owner) throw new InvalidOperationException("다른 캐릭터의 설정 요청");
             catalog ??= new();
             var action = r.GetProperty("Action").GetString();
+            var expansion = r.TryGetProperty("Expansion", out var scope) ? scope.GetUInt32() : 6u;
+            if (expansion > 6) throw new ArgumentException("잘못된 제작수첩 확장팩입니다.");
+            if (action == "SetLegacyBookScope" && !Profile.BookItems.Any(id => !Profile.BookScopes.ContainsKey(id)))
+                return "{\"Accepted\":true,\"Changed\":false}";
             uint[]? selection = null;
             if (action == "SetSelection") {
                 selection = r.GetProperty("Items").Deserialize<uint[]>() ?? [];
@@ -33,7 +37,7 @@ internal sealed partial class HarvestService
                 _ = r.GetProperty("Selected").GetBoolean(); _ = r.GetProperty("Book").GetBoolean();
             }
             if (visit != null && action is not ("CanGrow" or "GetSettings" or "Register")) {
-                if (action is not ("AddGoal" or "SetBook" or "RemoveGoal" or "RemoveCell" or "Register" or "SetCell" or "SetSelection" or "AutoRegister")) throw new ArgumentException("Unknown configuration action");
+                if (action is not ("AddGoal" or "SetBook" or "RemoveGoal" or "RemoveCell" or "Register" or "SetCell" or "SetSelection" or "AutoRegister" or "SetLegacyBookScope")) throw new ArgumentException("Unknown configuration action");
                 var queued = System.Text.Json.Nodes.JsonNode.Parse(json)!;
                 queued["Character"] = owner;
                 StopOwnedTravel(visit);
@@ -46,7 +50,7 @@ internal sealed partial class HarvestService
                 var item = r.GetProperty("Item").GetUInt32();
                 if (!catalog.Crops.ContainsKey(item) && !catalog.SeedCrops.ContainsKey(item)) throw new ArgumentException("재배 품목이 아닙니다.");
                 if (action == "SetBook") {
-                    if (r.GetProperty("Selected").GetBoolean()) Profile.BookItems.Add(item); else Profile.BookItems.Remove(item);
+                    Profile.SelectBook(item, r.GetProperty("Selected").GetBoolean(), expansion);
                 } else {
                     var target = r.GetProperty("Quantity").GetInt32();
                     if (target <= 0 || target > 999999) throw new ArgumentException("수량은 1~999999 범위여야 합니다.");
@@ -54,7 +58,12 @@ internal sealed partial class HarvestService
                     if (goal == null) Profile.Goals.Add(new() { Item = item, Quantity = target });
                     else { goal.Quantity = target; goal.Enabled = true; goal.Complete = false; }
                 }
-            } else if (action == "SetSelection") Profile.SelectItems(selection!, r.GetProperty("Selected").GetBoolean(), r.GetProperty("Book").GetBoolean());
+            } else if (action == "SetSelection") Profile.SelectItems(selection!, r.GetProperty("Selected").GetBoolean(), r.GetProperty("Book").GetBoolean(), expansion);
+            else if (action == "SetLegacyBookScope") {
+                var changed = Profile.SetLegacyBookScope(expansion);
+                if (changed) { config.Save(); nextRefresh = DateTime.MinValue; }
+                return JsonSerializer.Serialize(new { Accepted = true, Changed = changed });
+            }
             else if (action == "RemoveGoal") Profile.Goals.RemoveAll(g => g.Item == r.GetProperty("Item").GetUInt32());
             else if (action == "SetCell") Profile.SelectCell(r.GetProperty("Id").GetString() ?? "", r.GetProperty("Selected").GetBoolean());
             else if (action == "RemoveCell") Profile.Cells.RemoveAll(c => c.Id == r.GetProperty("Id").GetString());

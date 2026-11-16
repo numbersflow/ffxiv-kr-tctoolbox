@@ -67,6 +67,7 @@ public sealed class HarvestProfile
 {
     public List<HarvestGoal> Goals { get; set; } = [];
     public HashSet<uint> BookItems { get; set; } = [];
+    public Dictionary<uint, HashSet<uint>> BookScopes { get; set; } = [];
     public List<GardenCell> Cells { get; set; } = [];
     public Dictionary<string, GardenWalkRoute> WalkRoutes { get; set; } = [];
     public int RegisterPatches(GardenCell[] discovered, Action persist)
@@ -130,10 +131,32 @@ public sealed class HarvestProfile
         var cell = Cells.Find(c => c.Id == id) ?? throw new ArgumentException("등록된 화단 칸이 아닙니다.");
         cell.Enabled = selected;
     }
-    public void SelectItems(IEnumerable<uint> items, bool selected, bool book)
+    public IEnumerable<uint> BookExpansions(uint item) => BookScopes.TryGetValue(item, out var scopes) ? scopes : new uint[] { 6 };
+    public bool BookSelected(uint item, uint expansion = 6) => BookItems.Contains(item)
+        && (expansion == 6 || BookExpansions(item).Contains(6u) || BookExpansions(item).Contains(expansion));
+    public bool SetLegacyBookScope(uint expansion)
+    {
+        if (expansion > 6) throw new ArgumentOutOfRangeException(nameof(expansion));
+        var legacy = BookItems.Where(id => !BookScopes.ContainsKey(id)).ToArray();
+        foreach (var id in legacy) BookScopes[id] = [expansion];
+        return legacy.Length > 0;
+    }
+    public void SelectBook(uint item, bool selected, uint expansion)
+    {
+        if (expansion > 6) throw new ArgumentOutOfRangeException(nameof(expansion));
+        var scopes = BookItems.Contains(item) ? BookExpansions(item).ToHashSet() : new HashSet<uint>();
+        if (expansion == 6) { scopes.Clear(); if (selected) scopes.Add(6); }
+        else {
+            if (scopes.Remove(6)) scopes.UnionWith(Enumerable.Range(0, 6).Select(i => (uint)i));
+            if (selected) scopes.Add(expansion); else scopes.Remove(expansion);
+        }
+        if (scopes.Count == 0) { BookItems.Remove(item); BookScopes.Remove(item); }
+        else { BookItems.Add(item); BookScopes[item] = scopes; }
+    }
+    public void SelectItems(IEnumerable<uint> items, bool selected, bool book, uint expansion = 6)
     {
         foreach (var id in items.Distinct()) {
-            if (book) { if (selected) BookItems.Add(id); else BookItems.Remove(id); }
+            if (book) SelectBook(id, selected, expansion);
             else if (!selected) Goals.RemoveAll(g => g.Item == id);
             else if (Goals.Find(g => g.Item == id) is { } goal) goal.Enabled = true;
             else Goals.Add(new() { Item = id, Quantity = 1 });

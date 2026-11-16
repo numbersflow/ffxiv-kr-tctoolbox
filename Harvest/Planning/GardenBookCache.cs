@@ -14,7 +14,13 @@ public sealed class GardenBookCache
     public string Error { get; private set; } = "";
     public void Reset() { Needs.Clear(); Ready = Updating = HasSnapshot = false; Error = ""; }
     public void Fail(string error) { Ready = Updating = false; Error = error; }
-    public void Update(string json, ulong owner)
+    public static Dictionary<uint, int> SelectedNeeds(HarvestProfile profile, IReadOnlyDictionary<uint, GardenBookCache> caches)
+        => profile.BookItems.ToDictionary(id => id, id => {
+            var scopes = profile.BookExpansions(id).ToArray();
+            if (scopes.Contains(6u)) scopes = [6];
+            return scopes.Sum(scope => caches.TryGetValue(scope, out var cache) ? cache.Needs.GetValueOrDefault(id) : 0);
+        });
+    public void Update(string json, ulong owner, uint expansion = 6)
     {
         try {
             using var doc = JsonDocument.Parse(json); var b = doc.RootElement;
@@ -23,7 +29,7 @@ public sealed class GardenBookCache
                 if (!pending) throw new InvalidOperationException(b.TryGetProperty("Error", out var e) ? e.GetString() : "제작 재료 조회 실패");
                 Ready = false; Updating = true; Error = ""; return;
             }
-            if (owner == 0 || b.GetProperty("Character").GetUInt64() != owner || b.GetProperty("Expansion").GetUInt32() != 6)
+            if (owner == 0 || b.GetProperty("Character").GetUInt64() != owner || b.GetProperty("Expansion").GetUInt32() != expansion)
                 throw new InvalidOperationException("제작수첩 조회 캐릭터·범위 확인 대기");
             if (b.GetProperty("Error").GetString() is { Length: > 0 } error) throw new InvalidOperationException(error);
             if (pending) { Ready = false; Updating = true; Error = ""; return; }

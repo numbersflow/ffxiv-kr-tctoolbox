@@ -10,7 +10,7 @@ public static class GardenView
 {
     public static GardenItemView[] Items(HarvestProfile profile, IReadOnlyDictionary<uint, Crop> crops,
         IReadOnlyDictionary<uint, uint> seeds, IReadOnlyDictionary<uint, Stock> stock,
-        IReadOnlyDictionary<uint, int> books, bool known)
+        IReadOnlyDictionary<uint, int> books, bool known, uint expansion = 6)
     {
         var goals = profile.Goals.ToDictionary(g => g.Item);
         return crops.Keys.Concat(seeds.Keys).Distinct().Select(id => {
@@ -19,7 +19,7 @@ public static class GardenView
             stock.TryGetValue(id, out var held);
             return new GardenItemView(id, seeds.ContainsKey(id) ? id : crop?.Seed ?? 0,
                 crop?.Flower ?? false, crop?.Hours ?? 0, goal?.Enabled == true,
-                profile.BookItems.Contains(id), goal?.Quantity ?? 0, goal?.Complete ?? false,
+                profile.BookSelected(id, expansion), goal?.Quantity ?? 0, goal?.Complete ?? false,
                 books.GetValueOrDefault(id), held?.Inventory ?? 0, held?.Retainer ?? 0, known && held != null);
         }).ToArray();
     }

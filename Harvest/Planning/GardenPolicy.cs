@@ -15,6 +15,18 @@ public static class GardenPolicy
     public static bool IsAnchor(GardenBatch batch, GardenCell cell) =>
         batch.Cross && !batch.Clearing && batch.Cells.Count > 1 && batch.Cells[1] == cell.Id;
 
+    public static bool LimitOrdinaryBatch(GardenBatch batch, IEnumerable<GardenCell> cells, int required, int owned)
+    {
+        if (batch.Cross) return false;
+        var selected = cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
+        var started = selected.Where(c => c.Owned || c.Pending.Length > 0).ToArray();
+        var remaining = Math.Max(0, required - owned - started.Length);
+        var ids = started.Concat(selected.Except(started).Take(remaining)).Select(c => c.Id).ToList();
+        var changed = batch.Required != required || !batch.Cells.SequenceEqual(ids);
+        batch.Required = required; batch.Cells = ids;
+        return changed;
+    }
+
     public static int RequiredSlots(IEnumerable<(uint Item, int Count, int Stack, int Room)> outputs) =>
         outputs.GroupBy(o => o.Item).Sum(g => {
             var first = g.First();

@@ -180,6 +180,49 @@ Check(viewProfile.BookItems.SetEquals(new uint[] {100}), "Bulk book deselection 
 var scopedView = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, new Dictionary<uint, int> { [100] = 3 }, true);
 Check(scopedView.Single(r => r.Item == 100) is { Needed: 3, Quantity: 9, BookSelected: true } && viewBooks[100] == 8,
     "Expansion views change displayed demand without changing all-expansion demand or selections.");
+var scopeProfile = new HarvestProfile { BookItems = [17548] };
+Check(scopeProfile.SetLegacyBookScope(1), "Legacy selections inherit the user's active HW scope once");
+Check(!scopeProfile.SetLegacyBookScope(3), "Migration cannot overwrite an explicitly saved expansion");
+GardenBookCache ScopeCache(uint expansion, int needed) {
+    var cache = new GardenBookCache();
+    cache.Update(JsonConvert.SerializeObject(new { Available=true,Character=10ul,Expansion=expansion,Pending=false,Error="",Rows=new[]{new {ItemId=17548u,Needed=needed}} }),10,expansion);
+    return cache;
+}
+var scopeCaches = new Dictionary<uint,GardenBookCache> { [6]=ScopeCache(6,8),[1]=ScopeCache(1,2),[3]=ScopeCache(3,6) };
+Check(GardenBookCache.SelectedNeeds(scopeProfile,scopeCaches)[17548] == 2, "HW-only cloud acorns must exclude the ShB chandelier's six acorns");
+Check(scopeProfile.BookSelected(17548,1) && !scopeProfile.BookSelected(17548,3), "Expansion views show only that scope's selection");
+scopeProfile.SelectBook(17548,true,3);
+Check(GardenBookCache.SelectedNeeds(scopeProfile,scopeCaches)[17548] == 8, "Only explicitly selected expansions are combined");
+scopeProfile.SelectBook(17548,false,1);
+Check(GardenBookCache.SelectedNeeds(scopeProfile,scopeCaches)[17548] == 6 && scopeProfile.BookItems.Contains(17548), "Removing HW preserves the independently selected ShB goal");
+scopeProfile.SelectBook(17548,true,6);
+Check(GardenBookCache.SelectedNeeds(scopeProfile,scopeCaches)[17548] == 8, "Selecting all uses the full snapshot once, without double counting");
+scopeProfile.SelectBook(17548,false,3);
+Check(scopeProfile.BookSelected(17548,1) && !scopeProfile.BookSelected(17548,3), "An individual expansion can be excluded from an all-expansion selection");
+var restoredScopes = JsonConvert.DeserializeObject<HarvestProfile>(JsonConvert.SerializeObject(scopeProfile))!;
+Check(restoredScopes.BookScopes[17548].SetEquals(scopeProfile.BookScopes[17548]), "Saved per-item expansion scopes survive reload");
+var reservedCells=Enumerable.Range(0,8).Select(i=>new GardenCell {Index=i}).ToArray();
+var reservedBatch=new GardenBatch {Required=8,Cells=reservedCells.Select(c=>c.Id).ToList()};
+Check(GardenPolicy.LimitOrdinaryBatch(reservedBatch,reservedCells,2,0) && reservedBatch.Cells.Count==2 && reservedBatch.Required==2,"Reducing the scope releases surplus unplanted cells");
+foreach(var cell in reservedCells)cell.Owned=true;
+reservedBatch.Cells=reservedCells.Select(c=>c.Id).ToList();
+GardenPolicy.LimitOrdinaryBatch(reservedBatch,reservedCells,2,0);
+Check(reservedBatch.Cells.Count==8 && reservedCells.All(c=>c.Owned),"Already planted cells survive a narrower scope");
+reservedBatch.Cross=true; reservedBatch.Required=8;
+Check(!GardenPolicy.LimitOrdinaryBatch(reservedBatch,reservedCells,2,0) && reservedBatch.Required==8,"Crossbreeding parent stages are not truncated like ordinary crops");
+{
+    var owned = new GardenCell {Owned=true,State="growing",Tended=DateTime.UtcNow.AddHours(-13)};
+    var p = new HarvestProfile {BookItems=[17548],Cells=[owned],Batch=new(){Cells=[owned.Id],Clearing=true}};
+    var service=(HarvestService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HarvestService));
+    const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+    void Set(string name,object value)=>typeof(HarvestService).GetField(name,flags)!.SetValue(service,value);
+    Set("owner",10ul);Set("config",new Configuration{Profiles=new(){[10]=p}});Set("bookCache",new GardenBookCache());
+    Set("stock",new Dictionary<uint,Stock>{[17548]=new(2,0,false)});
+    bool DueVisit()=>(bool)typeof(HarvestService).GetMethod("HasDueVisit",flags)!.Invoke(service,null)!;
+    Check(DueVisit(),"Meeting the reduced goal must not abandon already planted owned crops");
+    owned.Owned=false;owned.State="empty";
+    Check(!DueVisit(),"Once owned crops are cleared, meeting the goal stops further garden visits");
+}
 var straight = Enumerable.Range(0, 101).Select(i => new Vector3(i / 10f, 0, 0)).ToArray();
 var bookCache = new GardenBookCache();
 string BookReply(ulong character, bool pending, int needed = 8, uint expansion = 6) => JsonConvert.SerializeObject(new {
