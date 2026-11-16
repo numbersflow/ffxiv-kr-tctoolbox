@@ -160,7 +160,7 @@ internal sealed partial class HarvestService : IDisposable
         gardenView = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = 6, Error = error,
             BookReady = bookReady, BookError = bookError, BookHasSnapshot = bookCache.HasSnapshot,
             Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, books, stockKnown),
-            Cells = Profile.Cells, Batch = Profile.Batch, Routes = Profile.WalkRoutes.Values });
+            Cells = Profile.Cells, Batch = Profile.Batch, Routes = Profile.WalkRoutes.Values, Registration = RegistrationTarget() });
         var scope = (uint)requestedGardenExpansion;
         if (scope >= 6) return;
         try {
@@ -173,7 +173,7 @@ internal sealed partial class HarvestService : IDisposable
             gardenScopes[scope] = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = scope, Error = error,
                 BookReady = !b.GetProperty("Pending").GetBoolean(), BookError = "", BookHasSnapshot = true,
                 Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, scoped, stockKnown),
-                Cells = Profile.Cells, Batch = Profile.Batch, Routes = Profile.WalkRoutes.Values });
+                Cells = Profile.Cells, Batch = Profile.Batch, Routes = Profile.WalkRoutes.Values, Registration = RegistrationTarget() });
         } catch (Exception ex) { gardenScopes[scope] = JsonSerializer.Serialize(new { Available = false, Error = ex.Message }); }
     }
 

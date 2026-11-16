@@ -36,6 +36,19 @@ foreach (var missing in new[] { 0u, 2u, 6u, 10u })
 try { GardenTextData.Read(id => id == 4 ? " " : korean[id]); throw new InvalidDataException("Blank menu accepted."); }
 catch (InvalidOperationException) { passed++; }
 var fresh = new Configuration();
+var registered = new HarvestProfile();
+var firstCell = new GardenCell { Group = "밭", Index = 0, World = 1, Territory = 2, House = 3, X = 10 };
+var saves = 0;
+registered.RegisterCell(firstCell, () => saves++);
+Check(registered.Cells.Single() == firstCell && saves == 1, "RegisterCell persists the selected cell exactly once.");
+try { registered.RegisterCell(new() { Group = "밭", Index = 0, World = 1, Territory = 2, House = 3, X = 12 }, () => saves++); throw new Exception("Duplicate index accepted."); }
+catch (ArgumentException) { Check(registered.Cells.Count == 1 && saves == 1, "Duplicate index must not mutate or save registration."); }
+try { registered.RegisterCell(new() { Group = "다른 밭", Index = 1, World = 1, Territory = 2, House = 3, X = 10 }, () => saves++); throw new Exception("Duplicate physical cell accepted."); }
+catch (ArgumentException) { Check(registered.Cells.Count == 1 && saves == 1, "The same physical cell cannot be assigned another group or index."); }
+try { registered.RegisterCell(new() { Group = "밭", Index = 1, World = 1, Territory = 2, House = 3, X = 12 }, () => throw new IOException("save failed")); throw new Exception("Failed save accepted."); }
+catch (IOException) { Check(registered.Cells.Count == 1 && registered.Cells[0] == firstCell, "Failed persistence rolls back only the new registration."); }
+registered.RegisterCell(new() { Group = "밭", Index = 1, World = 1, Territory = 2, House = 3, X = 12 }, () => saves++);
+Check(registered.Cells.Count == 2 && saves == 2, "A different physical cell can be registered under the next index.");
 Check(!fresh.GardensWork.AutoLoopEnabled && fresh.EnabledModules.Count == 0, "Install must not start automatic gardening.");
 var restored = JsonConvert.DeserializeObject<Configuration>("{\"Version\":6,\"EnabledModules\":[\"AutoGardensWork\"],\"GardensWork\":{\"SeedItemId\":14007,\"AutoLoopEnabled\":true},\"UnrelatedModule\":{\"Keep\":42}}")!;
 var roundTrip = JObject.Parse(JsonConvert.SerializeObject(restored));

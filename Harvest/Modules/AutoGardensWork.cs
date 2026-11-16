@@ -1019,6 +1019,12 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         return kind == PatchKind.Plot ? "plot" : "pot";
     }
 
+    public bool CanManageCurrentHouse()
+    {
+        var housing = HousingManager.Instance();
+        return housing != null && HasGardenPermission(housing);
+    }
+
     /// <summary>物件與玩家的距離（碼）；找不到時回 -1。</summary>
     public float GetPatchDistance(ulong gameObjectId)
     {

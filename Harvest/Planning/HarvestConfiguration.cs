@@ -58,33 +58,52 @@ internal sealed partial class HarvestService
             else if (action == "RemoveGoal") Profile.Goals.RemoveAll(g => g.Item == r.GetProperty("Item").GetUInt32());
             else if (action == "SetCell") Profile.SelectCell(r.GetProperty("Id").GetString() ?? "", r.GetProperty("Selected").GetBoolean());
             else if (action == "RemoveCell") Profile.Cells.RemoveAll(c => c.Id == r.GetProperty("Id").GetString());
-            else if (action == "Register") RegisterCell(r.GetProperty("Group").GetString() ?? "", r.GetProperty("Index").GetInt32(), r.GetProperty("Route").GetString() ?? "");
+            else if (action == "Register") {
+                var cell = RegisterCell(r.GetProperty("Group").GetString() ?? "", r.GetProperty("Index").GetInt32(), r.GetProperty("Route").GetString() ?? "");
+                nextRefresh = DateTime.MinValue; PublishGardenView();
+                var message = $"재배 칸 등록 완료 · {cell.Group} / {cell.Index} · {(cell.Kind == "pot" ? "실내 화분" : "실외 밭")} · 총 {Profile.Cells.Count}칸";
+                Svc.Log.Information(message);
+                return JsonSerializer.Serialize(new { Accepted = true, Message = message, Cell = cell });
+            }
             else if (action == "GetSettings") return JsonSerializer.Serialize(new { Accepted = true, Character = owner, Profile });
             else if (action != "CanGrow") throw new ArgumentException("Unknown Harvest configuration action");
             config.Save(); nextRefresh = DateTime.MinValue;
             PublishGardenView();
             return "{\"Accepted\":true}";
-        } catch (Exception ex) { return JsonSerializer.Serialize(new { Accepted = false, Error = ex.Message }); }
+        } catch (Exception ex) {
+            Svc.Log.Warning("Harvest configuration rejected: " + ex.Message);
+            return JsonSerializer.Serialize(new { Accepted = false, Error = ex.Message });
+        }
     }
 
-    private unsafe void RegisterCell(string group, int index, string travel)
+    private unsafe GardenCell RegisterCell(string group, int index, string travel)
     {
         if (string.IsNullOrWhiteSpace(group) || index is < 0 or > 7 || string.IsNullOrWhiteSpace(travel) || travel.Length > 256)
             throw new ArgumentException("시설 이름, 칸 번호 0~7, Lifestream 경로가 필요합니다.");
         var target = Svc.Targets.Target ?? throw new InvalidOperationException("화단의 한 칸 또는 화분을 선택하세요.");
         var player = Svc.Objects.LocalPlayer ?? throw new InvalidOperationException("캐릭터 확인 대기");
         var kind = garden.GetPatchKind(target.GameObjectId);
-        if (kind == "unknown") throw new InvalidOperationException("재배할 수 있는 시설을 선택하세요.");
+        if (kind == "unknown") throw new InvalidOperationException($"선택 대상 '{target.Name.TextValue}'은 재배 칸이 아닙니다. 밭 전체가 아닌 작물을 심는 칸을 선택하세요. ({target.ObjectKind}, {target.BaseId})");
         var housing = HousingManager.Instance();
-        if (housing == null || !housing->HasHousePermissions()) throw new InvalidOperationException("주택 관리 권한 확인 필요");
+        if (housing == null || !garden.CanManageCurrentHouse()) throw new InvalidOperationException("현재 주택의 재배 관리 권한을 확인할 수 없습니다.");
         var house = kind == "pot" ? housing->GetCurrentIndoorHouseId().Id : housing->GetCurrentHouseId().Id;
-        if (house == 0) throw new InvalidOperationException("현재 주택 식별 실패");
-        if (Profile.Cells.Any(c => c.Group == group && c.Index == index && c.World == player.CurrentWorld.RowId && c.House == house))
-            throw new ArgumentException("같은 시설·칸 번호가 이미 등록돼 있습니다.");
-        Profile.Cells.Add(new() { Group = group, Index = index, Kind = kind, House = house,
+        if (house is 0 or ulong.MaxValue) throw new InvalidOperationException("현재 주택 식별 실패");
+        if (garden.GetPatchDistance(target.GameObjectId) > 6f) throw new InvalidOperationException("선택한 재배 칸 가까이에서 등록하세요. 현재 서 있는 위치도 접근 위치로 저장합니다.");
+        var cell = new GardenCell { Group = group, Index = index, Kind = kind, House = house,
             World = player.CurrentWorld.RowId, Territory = Svc.ClientState.TerritoryType,
             X = target.Position.X, Y = target.Position.Y, Z = target.Position.Z,
-            ApproachX = player.Position.X, ApproachY = player.Position.Y, ApproachZ = player.Position.Z, Travel = travel });
+            ApproachX = player.Position.X, ApproachY = player.Position.Y, ApproachZ = player.Position.Z, Travel = travel };
+        Profile.RegisterCell(cell, config.Save);
+        return cell;
+    }
+
+    private object RegistrationTarget()
+    {
+        var target = Svc.Targets.Target;
+        return new { Name = target?.Name.TextValue ?? "선택 없음", ObjectId = target?.GameObjectId ?? 0,
+            BaseId = target?.BaseId ?? 0, ObjectKind = target?.ObjectKind.ToString() ?? "None",
+            Kind = target == null ? "unknown" : garden.GetPatchKind(target.GameObjectId),
+            Permission = garden.CanManageCurrentHouse(), Distance = target == null ? -1 : garden.GetPatchDistance(target.GameObjectId) };
     }
 
     private void Post(object request)

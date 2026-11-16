@@ -53,7 +53,7 @@ internal sealed partial class HarvestService
                 var reason = RecordingBlocker();
                 return JsonSerializer.Serialize(new { Accepted = true, Location = CurrentRouteLocation(),
                     Position = new { Svc.Objects.LocalPlayer!.Position.X, Svc.Objects.LocalPlayer.Position.Y, Svc.Objects.LocalPlayer.Position.Z },
-                    Blocked = reason != null, Reason = reason, Motion = RecordingMotion().ToString(), Busy = garden.IsBusy || visit != null, Recording = routeRecording?.Active == true });
+                    Registration = RegistrationTarget(), Blocked = reason != null, Reason = reason, Motion = RecordingMotion().ToString(), Busy = garden.IsBusy || visit != null, Recording = routeRecording?.Active == true });
             }
             if (action == "Start") {
                 if (routeRecording?.Active == true) {

@@ -67,6 +67,17 @@ public sealed class HarvestProfile
     public HashSet<uint> BookItems { get; set; } = [];
     public List<GardenCell> Cells { get; set; } = [];
     public Dictionary<string, GardenWalkRoute> WalkRoutes { get; set; } = [];
+    public void RegisterCell(GardenCell cell, Action persist)
+    {
+        var sameHouse = Cells.Where(c => c.World == cell.World && c.Territory == cell.Territory && c.House == cell.House).ToArray();
+        if (sameHouse.Any(c => c.Group == cell.Group && c.Index == cell.Index))
+            throw new ArgumentException("같은 시설·칸 번호가 이미 등록돼 있습니다. 목록을 확인하거나 다른 번호를 선택하세요.");
+        if (sameHouse.Any(c => c.Kind == cell.Kind && Vector3.Distance(c.Position, cell.Position) < 0.1f))
+            throw new ArgumentException("이미 등록한 재배 칸입니다. 게임에서 다른 칸을 선택하세요.");
+        Cells.Add(cell);
+        try { persist(); }
+        catch { Cells.Remove(cell); throw; }
+    }
     public GardenWalkRoute SaveWalkRoute(ManualGardenRoute recording, string token, ulong owner,
         GardenRouteLocation location, Vector3 position, long now, Action? persist = null)
     {
