@@ -48,7 +48,7 @@ internal sealed partial class HarvestService
         if (ExternalNav.TryGetActiveMover(out _)) return true;
         work.RouteWalking = true;
         Svc.PluginInterface.GetIpcSubscriber<List<Vector3>, bool?, float?, float?, object>("Lifestream.MoveEx")
-            .InvokeAction(points, false, 0.3f, 0.15f);
+            .InvokeAction(points, true, 0.3f, 0.15f);
         return true;
     }
 }

@@ -38,6 +38,21 @@ internal static class ContextMenuLayoutDerivation
     /// <param name="readMatch">給特徵碼與長度，回命中點起算的位元組；沒命中回 null。</param>
     /// <param name="evidence">每個來源的結果，寫進 log 用。</param>
     internal static int Derive(Func<string, int, byte[]?> readMatch, out string evidence)
+        => Derive(readMatch, out evidence, 2);
+
+    // A KR candidate from one source is usable only after validating the live menu array.
+    internal static int DeriveForRuntimeValidation(Func<string, int, byte[]?> readMatch, out string evidence)
+        => Derive(readMatch, out evidence, 1);
+
+    internal static bool ValidateEntries(int first, int count, IReadOnlyList<bool> strings)
+    {
+        if (first < MinIndex || first > MaxIndex || count < 0 || count > 32 || first > strings.Count || count > strings.Count - first) return false;
+        for (var i = 2; i < first; i++) if (strings[i]) return false;
+        for (var i = 0; i < count; i++) if (!strings[first + i]) return false;
+        return true;
+    }
+
+    private static int Derive(Func<string, int, byte[]?> readMatch, out string evidence, int requiredSources)
     {
         var found = new List<int>();
         var notes = new List<string>();
@@ -69,7 +84,7 @@ internal static class ContextMenuLayoutDerivation
             if(value != NotDerived) found.Add(value);
         }
         evidence = string.Join("；", notes);
-        if(found.Count < 2) return NotDerived;
+        if(found.Count < requiredSources) return NotDerived;
         foreach(var value in found)
         {
             if(value != found[0]) return NotDerived;

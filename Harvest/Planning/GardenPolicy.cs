@@ -6,6 +6,11 @@ namespace Harvest.Planning;
 
 public static class GardenPolicy
 {
+    public static uint Soil(bool cross, uint crossingSoil) => cross ? crossingSoil : 16026u;
+
+    public static bool CanVisit(GardenCell cell, IReadOnlyDictionary<uint, Stock> stock, uint soil) =>
+        cell.Pending.Length > 0 || cell.Owned
+        || stock.GetValueOrDefault(cell.Seed)?.Inventory > 0 && stock.GetValueOrDefault(soil)?.Inventory > 0;
     // The second cell stays planted, including when both parents use the same seed.
     public static bool IsAnchor(GardenBatch batch, GardenCell cell) =>
         batch.Cross && !batch.Clearing && batch.Cells.Count > 1 && batch.Cells[1] == cell.Id;

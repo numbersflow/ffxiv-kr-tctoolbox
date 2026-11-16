@@ -49,6 +49,7 @@ internal sealed partial class HarvestService : IDisposable
     internal Catalog? Catalog => catalog;
     internal HarvestProfile? CurrentProfile => displayProfile;
     internal string Error => error;
+    private uint CurrentSoil => GardenPolicy.Soil(Profile.Batch?.Cross == true, Profile.Soil);
 
     public HarvestService(Configuration config, AutoGardensWork garden)
     {
@@ -110,7 +111,7 @@ internal sealed partial class HarvestService : IDisposable
                 GardenCropData.AddKnownCropNames(catalog.Crops.Values.Select(c => (c.Name, c.Item)));
             }
             RefreshGardenBooks();
-            var ids = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Concat(new uint[] { Profile.Soil, 14011, 14012, 14013 })
+            var ids = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Concat(new uint[] { Profile.Soil, 16026, 14011, 14012, 14013 })
                 .Where(i => i > 0).Distinct().ToArray();
             using var response = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<string, string>("GatherBuddyReborn.GetHarvestStock")
                 .InvokeFunc(JsonSerializer.Serialize(ids)));
@@ -120,7 +121,8 @@ internal sealed partial class HarvestService : IDisposable
             if (!root.GetProperty("Available").GetBoolean() || root.GetProperty("Character").GetUInt64() != owner
                 || !root.GetProperty("RetainerKnown").GetBoolean()) throw new InvalidOperationException("가방·집사 재고 확인 대기");
             stock = root.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(),
-                r => new Stock(r.GetProperty("Inventory").GetInt32(), r.GetProperty("Retainer").GetInt32(), r.GetProperty("CanProcure").GetBoolean()));
+                r => new Stock(r.GetProperty("Inventory").GetInt32(), r.GetProperty("Retainer").GetInt32(), r.GetProperty("CanProcure").GetBoolean(),
+                    !r.TryGetProperty("CanProcureNow", out var due) || due.GetBoolean()));
             stockKnown = true;
             if (Profile.BookItems.Count > 0 && !bookReady) {
                 if (bookCache.Updating) throw new GardenBookPendingException();
@@ -128,12 +130,16 @@ internal sealed partial class HarvestService : IDisposable
             }
             error = "";
             Replan();
-            var ready = Profile.RetryAt <= DateTime.UtcNow && (supplies.Any(p => stock.GetValueOrDefault(p.Key)?.Inventory < p.Value)
-                || HasDueVisit());
+            var visitReady = HasDueVisit() && Profile.Cells.Any(c => Profile.Batch!.Cells.Contains(c.Id) && c.Enabled && Due(c)
+                && GardenPolicy.CanVisit(c, stock, CurrentSoil));
+            var supply = supplies.Where(p => !visitReady && stock.GetValueOrDefault(p.Key) is { CanProcureNow: true } s && s.Inventory < p.Value)
+                .Select(p => new { ItemId = p.Key, TargetCount = p.Value }).FirstOrDefault();
+            var ready = Profile.RetryAt <= DateTime.UtcNow && (supply != null || visitReady);
             snapshot = JsonSerializer.Serialize(new { Available = true, Character = owner, Ready = ready,
-                Supply = supplies.Where(p => !HasCareDue() && stock.GetValueOrDefault(p.Key)?.Inventory < p.Value)
-                    .Select(p => new { ItemId = p.Key, TargetCount = p.Value }).FirstOrDefault(),
-                Detail = Profile.Batch == null ? (error.Length > 0 ? error : "필요한 재배 없음") : catalog.Names.GetValueOrDefault(Profile.Batch.Output) ?? "재배",
+                Supply = supply,
+                Detail = Profile.Batch == null ? (error.Length > 0 ? error : "필요한 재배 없음")
+                    : !ready && supplies.Any(p => stock.GetValueOrDefault(p.Key)?.Inventory < p.Value)
+                        ? "재배 재료 확보 조건 대기 · 다른 작업 진행" : catalog.Names.GetValueOrDefault(Profile.Batch.Output) ?? "재배",
                 Goals = Profile.Goals, BookItems = Profile.BookItems, Growable = catalog.Crops.Keys,
                 Searchable = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         } catch (Exception ex) {
@@ -150,7 +156,7 @@ internal sealed partial class HarvestService : IDisposable
             using var state = JsonDocument.Parse(snapshot);
             var r = state.RootElement;
             var readiness = $"available={r.GetProperty("Available")}, ready={r.GetProperty("Ready")}, bookReady={bookReady}, bookUpdating={bookCache.Updating}, bookSnapshot={bookCache.HasSnapshot}, stockKnown={stockKnown}, error={error}, batch={Profile.Batch?.Output}, supplies={string.Join(',', supplies.Select(p => $"{p.Key}:{p.Value}"))}";
-            if (readiness != lastReadiness) { lastReadiness = readiness; Svc.Log.Information("Garden readiness: " + readiness); }
+            if ((!bookCache.Updating || error.Length > 0) && readiness != lastReadiness) { lastReadiness = readiness; Svc.Log.Information("Garden readiness: " + readiness); }
         }
     }
 
@@ -254,7 +260,7 @@ internal sealed partial class HarvestService : IDisposable
         var cells = Profile.Cells.Where(c => batch.Cells.Contains(c.Id) && c.Enabled).ToArray();
         foreach (var group in cells.Where(c => !c.Owned).GroupBy(c => c.Seed)) supplies[group.Key] = group.Count();
         var soil = cells.Count(c => !c.Owned);
-        if (soil > 0) supplies[Profile.Soil] = soil;
+        if (soil > 0) supplies[CurrentSoil] = soil;
         if (!batch.Cross && catalog!.Crops.TryGetValue(batch.Output, out var crop))
             foreach (var group in cells.SelectMany(c => crop.Colors.Skip(c.ColorStep)).GroupBy(i => i)) supplies[group.Key] = group.Count();
     }

@@ -44,7 +44,7 @@ internal static unsafe class ContextMenuLayout
             }
             else
             {
-                index = ContextMenuLayoutDerivation.Derive(ReadMatch, out evidence);
+                index = ContextMenuLayoutDerivation.DeriveForRuntimeValidation(ReadMatch, out evidence);
             }
         }
         catch (Exception ex)
@@ -56,7 +56,7 @@ internal static unsafe class ContextMenuLayout
         if (index == ContextMenuLayoutDerivation.NotDerived)
             Svc.Log.Error($"[Harvest] 推不出右鍵選單第一個項目在 AtkValues 的哪一格，用到它的功能停用（{evidence}）");
         else
-            Svc.Log.Information($"[Harvest] 右鍵選單第一個項目在 AtkValues[{index}]（{evidence}）");
+            Svc.Log.Information($"[Harvest] Context menu candidate AtkValues[{index}]; live array validation required ({evidence})");
 
         return index;
     }

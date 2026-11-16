@@ -70,7 +70,8 @@ internal sealed partial class HarvestService
             if (work.Cell == null) {
                 var batch = Profile.Batch;
                 work.Cell = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true && !work.Done.Contains(c.Id) && Due(c))
-                    .OrderBy(c => c.State == "empty" ? 0 : 1).FirstOrDefault();
+                    .Where(c => GardenPolicy.CanVisit(c, stock, CurrentSoil))
+                    .OrderBy(c => c.Owned || c.Pending.Length > 0 ? 0 : 1).FirstOrDefault();
                 if (work.Cell == null) return End(work, work.Failed == 0 ? "Succeeded" : "Partial");
                 work.StepAt = DateTime.UtcNow; work.Scanning = false; work.Verifying = false;
             }
@@ -95,7 +96,7 @@ internal sealed partial class HarvestService
                 if (candidates.Length != 1) throw new InvalidOperationException("등록 시설의 칸을 유일하게 식별할 수 없습니다.");
                 work.Object = candidates[0].Object;
             }
-            if (garden.GetPatchDistance(work.Object) > 3f) {
+            if (garden.GetPatchDistance(work.Object) > AutoGardensWork.InteractRange) {
                 if (work.Move) {
                     if (ExternalNav.IsVnavmeshPathRunning() || ExternalNav.IsVnavmeshPathfindInProgress()) return Busy(work, "시설 접근");
                     throw new InvalidOperationException("시설 접근이 상호작용 범위에 도달하지 못했습니다.");
@@ -132,7 +133,7 @@ internal sealed partial class HarvestService
                 : action == AutoGardensWork.GardenAction.Fertilize ? Colors(cell).ElementAt(cell.ColorStep) : 0;
             cell.Before = consumed == 0 ? 0 : Bag(consumed);
             if (consumed > 0 && cell.Before == 0) { FinishCell(work); return Busy(work, "재료 준비 대기"); }
-            if (action == AutoGardensWork.GardenAction.Plant && Bag(Profile.Soil) == 0) { FinishCell(work); return Busy(work, "흙 준비 대기"); }
+            if (action == AutoGardensWork.GardenAction.Plant && Bag(CurrentSoil) == 0) { FinishCell(work); return Busy(work, "흙 준비 대기"); }
             if (action == AutoGardensWork.GardenAction.Harvest && FreeSlots() < HarvestSlots(cell) + work.ReservedSlots) {
                 work.RequiredSpace = HarvestSlots(cell) + work.ReservedSlots;
                 throw new InvalidOperationException("가방 여유 부족 · 작물과 교배 씨앗 수용 공간 필요");
@@ -181,6 +182,7 @@ internal sealed partial class HarvestService
             if (!catalog!.SeedCrops.TryGetValue(cell.Seed, out var expected) || cell.Crop != expected)
                 throw new InvalidOperationException("심기 결과의 작물이 계획과 다릅니다.");
             cell.Owned = true; cell.Planted = cell.Tended = DateTime.UtcNow; cell.ColorStep = 0;
+            _ = Bag(CurrentSoil);
         } else if (action == "Harvest") {
             if (state != PatchState.Empty) throw new InvalidOperationException("수확 결과 미확정 · 재전송하지 않습니다.");
             cell.Owned = false; cell.Planted = DateTime.MinValue; cell.ColorStep = 0;
@@ -196,7 +198,7 @@ internal sealed partial class HarvestService
     }
     private void Queue(Visit work, AutoGardensWork.GardenAction action, uint item = 0)
     {
-        var message = garden.EnqueueSingle(action, work.Object, item, work.Cell!.Seed, Profile.Soil);
+        var message = garden.EnqueueSingle(action, work.Object, item, work.Cell!.Seed, CurrentSoil);
         if (message.Length > 0) throw new InvalidOperationException(message);
     }
     private int Bag(uint item)
@@ -205,7 +207,9 @@ internal sealed partial class HarvestService
             .InvokeFunc(JsonSerializer.Serialize(new[] { item })));
         var r = doc.RootElement;
         if (!r.GetProperty("Available").GetBoolean() || r.GetProperty("Character").GetUInt64() != owner) throw new InvalidOperationException("재고 재확인 대기");
-        return r.GetProperty("Rows")[0].GetProperty("Inventory").GetInt32();
+        var count = r.GetProperty("Rows")[0].GetProperty("Inventory").GetInt32();
+        if (stock.TryGetValue(item, out var previous)) stock[item] = previous with { Inventory = count };
+        return count;
     }
     private static unsafe int FreeSlots()
     {

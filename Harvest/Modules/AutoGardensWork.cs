@@ -67,7 +67,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
     private const byte PotUsageType = 11;
 
     /// <summary>互動距離上限（碼）；超出的跳過。</summary>
-    private const float InteractRange = 6f;
+    public const float InteractRange = 6f;
 
     /// <summary>搜尋半徑（碼）：室外庭院與室內房間都用同一個值。</summary>
     private const float SearchRange = 30f;
@@ -653,11 +653,15 @@ public sealed unsafe partial class AutoGardensWork : TcModule
             // 聲稱的筆數放不進實際陣列＝殘值或正在拆解（用減法寫，避免 firstEntryIndex + entryCount 溢位）。
             // entryCount 為 0 時照舊往下走，讓「沒有施肥選項」那條路徑跳過此格。
             if (entryCount < 0 || values.Length - firstEntryIndex < entryCount) return false;
+            var strings = new bool[Math.Min(values.Length, firstEntryIndex + Math.Max(0, entryCount))];
+            for (var i = 0; i < strings.Length; i++)
+                strings[i] = values[i].Type is ValueType.String or ValueType.String8 or ValueType.ManagedString;
+            if (!ContextMenuLayoutDerivation.ValidateEntries(firstEntryIndex, entryCount, strings)) return false;
 
             for (var i = 0; i < entryCount; i++)
             {
                 var value = values[firstEntryIndex + i];
-                if (value.Type is not (ValueType.String or ValueType.ManagedString) || value.String.Value == null)
+                if (value.Type is not (ValueType.String or ValueType.String8 or ValueType.ManagedString) || value.String.Value == null)
                     continue;
 
                 var text = MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue;

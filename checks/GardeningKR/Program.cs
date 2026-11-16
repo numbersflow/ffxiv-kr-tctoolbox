@@ -36,6 +36,28 @@ foreach (var missing in new[] { 0u, 2u, 6u, 10u })
 try { GardenTextData.Read(id => id == 4 ? " " : korean[id]); throw new InvalidDataException("Blank menu accepted."); }
 catch (InvalidOperationException) { passed++; }
 var fresh = new Configuration();
+var menuTypes = new bool[11]; menuTypes[8]=menuTypes[9]=menuTypes[10]=true;
+Check(ContextMenuLayoutDerivation.ValidateEntries(8,3,menuTypes), "KR context-menu candidate is confirmed by the live eight-field header and complete text entries.");
+Check(!ContextMenuLayoutDerivation.ValidateEntries(7,3,menuTypes) && !ContextMenuLayoutDerivation.ValidateEntries(9,2,menuTypes), "An off-by-one menu candidate cannot send the adjacent item's callback.");
+Check(!ContextMenuLayoutDerivation.ValidateEntries(8,4,menuTypes) && !ContextMenuLayoutDerivation.ValidateEntries(8,-1,menuTypes), "Truncated or invalid menu counts remain fail-closed.");
+var resetPattern = ContextMenuLayoutDerivation.Sources[0].Variants[0].Signature;
+var resetBytes = resetPattern.Split(' ').Select(t=>t=="??" ? (byte)0 : Convert.ToByte(t,16)).ToArray();
+resetBytes[6]=8; BitConverter.GetBytes(48).CopyTo(resetBytes,15); BitConverter.GetBytes(50).CopyTo(resetBytes,21);
+byte[]? SingleReset(string signature,int length) => signature==resetPattern ? resetBytes : null;
+Check(ContextMenuLayoutDerivation.Derive(SingleReset,out _) == ContextMenuLayoutDerivation.NotDerived
+    && ContextMenuLayoutDerivation.DeriveForRuntimeValidation(SingleReset,out _) == 8,
+    "The observed KR single-source signature remains insufficient alone; only the runtime-validated menu path accepts its candidate.");
+Check(GardenPolicy.Soil(false, 7766) == 16026 && GardenPolicy.Soil(true, 7766) == 7766,
+    "Ordinary planting uses vendor potting soil; crossing preserves the configured crossing soil.");
+var partialStock = new Dictionary<uint, Stock> { [17547]=new(8,0,true), [16026]=new(1,0,true), [7766]=new(0,0,true,false) };
+var plantingCell = new GardenCell { Seed=17547 };
+Check(GardenPolicy.CanVisit(plantingCell,partialStock,16026), "One available soil allows one planting without waiting for all eight supplies.");
+partialStock[16026] = new(0,0,true);
+Check(!GardenPolicy.CanVisit(plantingCell,partialStock,16026), "After consuming the last soil, empty cells return to material preparation.");
+plantingCell.Owned=true;
+Check(GardenPolicy.CanVisit(plantingCell,partialStock,16026), "Owned crops can be tended or harvested even while new planting materials are missing.");
+plantingCell.Owned=false; plantingCell.Pending="Plant";
+Check(GardenPolicy.CanVisit(plantingCell,partialStock,16026), "An uncertain previous operation is reconciled before any new material preparation.");
 bool ReadPlanningResult(Func<bool, TimeSpan> interval)
 {
     var cache = new GardenBookCache();
