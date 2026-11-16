@@ -105,6 +105,31 @@ var scopedView = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, 
 Check(scopedView.Single(r => r.Item == 100) is { Needed: 3, Quantity: 9, BookSelected: true } && viewBooks[100] == 8,
     "Expansion views change displayed demand without changing all-expansion demand or selections.");
 var straight = Enumerable.Range(0, 101).Select(i => new Vector3(i / 10f, 0, 0)).ToArray();
+var bookCache = new GardenBookCache();
+string BookReply(ulong character, bool pending, int needed = 8, uint expansion = 6) => JsonConvert.SerializeObject(new {
+    Available=true, Character=character, Expansion=expansion, Pending=pending, Error="", Rows=new[] {new {ItemId=100u, Needed=needed}}
+});
+bookCache.Update("{\"Available\":false,\"Pending\":true,\"Error\":\"전체 제작수첩 재료 계산 중\"}",10);
+Check(bookCache.Updating && !bookCache.Ready && !bookCache.HasSnapshot && bookCache.Error == "", "Initial calculation is pending, not a global error.");
+bookCache.Update(BookReply(10,false),10);
+Check(bookCache.Ready && bookCache.HasSnapshot && bookCache.Needs[100] == 8, "A completed snapshot becomes available for rendering and execution.");
+bookCache.Update(BookReply(10,true,99),10);
+Check(bookCache.Updating && !bookCache.Ready && bookCache.HasSnapshot && bookCache.Needs[100] == 8 && bookCache.Error == "",
+    "Background refresh retains the confirmed display snapshot without certifying stale data as ready to execute.");
+bookCache.Update("{\"Available\":false,\"Pending\":true,\"Error\":\"전체 제작수첩 재료 계산 중\"}",10);
+Check(bookCache.HasSnapshot && bookCache.Needs[100] == 8 && bookCache.Error == "", "Repeated polling cannot erase the list or turn pending into a warning.");
+bookCache.Update("{\"Available\":false,\"Error\":\"IPC failure\"}",10);
+Check(!bookCache.Ready && !bookCache.Updating && bookCache.Error == "IPC failure", "Real query errors remain visible and prevent starting work.");
+bookCache.Update(BookReply(11,false,22),10);
+Check(!bookCache.Ready && bookCache.Needs[100] == 8 && bookCache.Error.Length > 0, "Another character cannot replace the snapshot.");
+bookCache.Update(BookReply(10,false,22,1),10);
+Check(!bookCache.Ready && bookCache.Needs[100] == 8, "A scoped reply cannot replace the full-book execution cache.");
+bookCache.Update(BookReply(10,false,3),10);
+Check(bookCache.Ready && bookCache.Needs[100] == 3 && !bookCache.Updating && bookCache.Error == "", "The next completed refresh replaces the old quantity.");
+bookCache.Update("{\"Available\":true,\"Character\":10,\"Expansion\":6,\"Pending\":false,\"Error\":\"\",\"Rows\":[]}",10);
+Check(bookCache.Ready && bookCache.HasSnapshot && bookCache.Needs.Count == 0, "An empty completed crafting book is not a perpetual loading state.");
+bookCache.Reset();
+Check(!bookCache.Ready && !bookCache.HasSnapshot && bookCache.Needs.Count == 0, "Logout and character changes clear cached demand.");
 Check(GardenRecordingPolicy.Blocker(GardenRecordingMotion.Ground) == null
     && GardenRecordingPolicy.Blocker(GardenRecordingMotion.Mounted) == null, "Passive coordinate capture must allow both walking and ground-mounted movement.");
 Check(GardenRecordingPolicy.Blocker(GardenRecordingMotion.Mounted | GardenRecordingMotion.Flying) != null,
