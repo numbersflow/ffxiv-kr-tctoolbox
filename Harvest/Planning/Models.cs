@@ -22,6 +22,8 @@ public sealed class GardenCell
     public uint Territory { get; set; }
     public uint World { get; set; }
     public ulong House { get; set; }
+    public uint LayoutInstanceKey { get; set; }
+    public uint LayoutSubId { get; set; }
     public float X { get; set; }
     public float Y { get; set; }
     public float Z { get; set; }
@@ -67,12 +69,37 @@ public sealed class HarvestProfile
     public HashSet<uint> BookItems { get; set; } = [];
     public List<GardenCell> Cells { get; set; } = [];
     public Dictionary<string, GardenWalkRoute> WalkRoutes { get; set; } = [];
+    public int RegisterPatches(GardenCell[] discovered, Action persist)
+    {
+        if (discovered.Length == 0) throw new ArgumentException("발견된 재배 칸이 없습니다.");
+        var first = discovered[0];
+        bool SameHouse(GardenCell c) => c.World == first.World && c.Territory == first.Territory && c.House == first.House;
+        var legacy = Cells.Where(c => SameHouse(c) && c.LayoutInstanceKey == 0 && c.Kind == first.Kind
+            && Vector3.DistanceSquared(c.Position, first.Position) < 0.1f * 0.1f).ToArray();
+        if (legacy.Any(c => c.Owned || c.Pending.Length > 0))
+            throw new InvalidOperationException("기존 칸의 진행 중 재배 기록을 확인해야 합니다. 자동 등록으로 덮어쓰지 않습니다.");
+        var previous = Cells;
+        var previousBatch = Batch;
+        var next = Cells.Except(legacy).ToList();
+        var added = 0;
+        foreach (var cell in discovered) {
+            if (next.Any(c => SameHouse(c) && c.Kind == cell.Kind && c.LayoutInstanceKey == cell.LayoutInstanceKey && c.LayoutSubId == cell.LayoutSubId)) continue;
+            next.Add(cell); added++;
+        }
+        Cells = next;
+        if (Batch != null && legacy.Any(c => Batch.Cells.Contains(c.Id))) Batch = null;
+        try { persist(); }
+        catch { Cells = previous; Batch = previousBatch; throw; }
+        return added;
+    }
     public void RegisterCell(GardenCell cell, Action persist)
     {
         var sameHouse = Cells.Where(c => c.World == cell.World && c.Territory == cell.Territory && c.House == cell.House).ToArray();
         if (sameHouse.Any(c => c.Group == cell.Group && c.Index == cell.Index))
             throw new ArgumentException("같은 시설·칸 번호가 이미 등록돼 있습니다. 목록을 확인하거나 다른 번호를 선택하세요.");
-        if (sameHouse.Any(c => c.Kind == cell.Kind && Vector3.Distance(c.Position, cell.Position) < 0.1f))
+        if (sameHouse.Any(c => c.Kind == cell.Kind && (c.LayoutInstanceKey != 0 && cell.LayoutInstanceKey != 0
+                ? c.LayoutInstanceKey == cell.LayoutInstanceKey && c.LayoutSubId == cell.LayoutSubId
+                : Vector3.Distance(c.Position, cell.Position) < 0.1f)))
             throw new ArgumentException("이미 등록한 재배 칸입니다. 게임에서 다른 칸을 선택하세요.");
         Cells.Add(cell);
         try { persist(); }

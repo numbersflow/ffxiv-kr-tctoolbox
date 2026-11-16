@@ -91,10 +91,9 @@ internal sealed partial class HarvestService
             }
             work.Travel = false;
             if (work.Object == 0) {
-                var candidates = Svc.Objects.Where(o => o.IsTargetable && Vector3.Distance(o.Position, cell.Position) < 0.75f
-                    && garden.GetPatchKind(o.GameObjectId) == cell.Kind).ToArray();
+                var candidates = NearbyPatches().Where(p => GardenRegistration.Matches(cell, p)).ToArray();
                 if (candidates.Length != 1) throw new InvalidOperationException("등록 시설의 칸을 유일하게 식별할 수 없습니다.");
-                work.Object = candidates[0].GameObjectId;
+                work.Object = candidates[0].Object;
             }
             if (garden.GetPatchDistance(work.Object) > 3f) {
                 if (work.Move) {

@@ -210,7 +210,7 @@ internal sealed partial class HarvestService : IDisposable
             GardenCell[] selected;
             if (stage != null) {
                 selected = Profile.Cells.Where(c => c.Enabled && c.Kind == "plot" && !c.Owned)
-                    .GroupBy(c => (c.Group, c.House, c.World, c.Territory)).SelectMany(g => g.SelectMany(a => g.Where(b => (a.Index + 1) % 8 == b.Index)
+                    .GroupBy(c => (c.Group, c.House, c.World, c.Territory, c.LayoutInstanceKey)).SelectMany(g => g.SelectMany(a => g.Where(b => (a.Index + 1) % 8 == b.Index)
                         .Select(b => new[] { a, b }))).FirstOrDefault() ?? [];
                 if (selected.Length != 2) { error = "교배할 같은 텃밭의 인접한 재배 칸 2개를 등록·선택해야 합니다."; continue; }
                 Profile.Batch = new() { Goal = item, Output = stage.Output, Required = stage.Required,

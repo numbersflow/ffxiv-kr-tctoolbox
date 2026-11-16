@@ -36,6 +36,31 @@ foreach (var missing in new[] { 0u, 2u, 6u, 10u })
 try { GardenTextData.Read(id => id == 4 ? " " : korean[id]); throw new InvalidDataException("Blank menu accepted."); }
 catch (InvalidOperationException) { passed++; }
 var fresh = new Configuration();
+var origin = new System.Numerics.Vector3(54.96415f, 25.99997f, -67.922775f);
+var offsets = new[] { (-1f,-1f), (0f,-1f), (1f,-1f), (1f,0f), (1f,1f), (0f,1f), (-1f,1f), (-1f,0f) };
+var observedPatches = offsets.Select((v,i) => new GardenPatch((ulong)(100+i), "plot", 4294639623u,
+    (uint)(7+i) << 24, origin, origin + new System.Numerics.Vector3(v.Item1,0,v.Item2))).Reverse().ToArray();
+var orderedPatches = GardenRegistration.Nearest(observedPatches, origin);
+Check(orderedPatches.Length == 8 && orderedPatches.Select(p=>p.SubId).SequenceEqual(observedPatches.OrderBy(p=>p.SubId).Select(p=>p.SubId)), "Captured Korean garden: eight objects share one origin but have distinct stable layout slots in ring order.");
+var rotation = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitY, 2);
+var rotatedPatches = observedPatches.Select(p => p with { Slot = origin + System.Numerics.Vector3.Transform(p.Slot-origin,rotation) }).ToArray();
+Check(GardenRegistration.Nearest(rotatedPatches,origin).Select(p=>p.SubId).SequenceEqual(orderedPatches.Select(p=>p.SubId)), "Rotating furniture must not change automatic slot numbering.");
+var autoCells = orderedPatches.Select((p,i) => new GardenCell { Group="밭", Index=i, World=1, Territory=2, House=3,
+    X=origin.X, Y=origin.Y, Z=origin.Z, LayoutInstanceKey=p.InstanceKey, LayoutSubId=p.SubId }).ToArray();
+Check(autoCells.All(c=>observedPatches.Count(p=>GardenRegistration.Matches(c,p))==1), "Actual visit matching uniquely resolves each slot despite identical object positions.");
+Check(autoCells.All(c=>observedPatches.Select(p=>p with { Object=p.Object+1000 }).Count(p=>GardenRegistration.Matches(c,p))==1), "Recreated object IDs must not invalidate saved layout identity.");
+var autoProfile = new HarvestProfile { Cells=[new() { Group="밭", World=1, Territory=2, House=3, X=origin.X, Y=origin.Y, Z=origin.Z }] };
+autoProfile.Batch = new() { Cells=[autoProfile.Cells[0].Id] };
+Check(autoProfile.RegisterPatches(autoCells,()=>{}) == 8 && autoProfile.Cells.Count==8 && autoProfile.Batch==null, "Automatic registration replaces the unused ambiguous legacy record and clears only its unstarted batch.");
+autoProfile.Cells[0].Owned=true; autoProfile.Cells[0].Seed=123; autoProfile.Cells[0].Enabled=false;
+Check(autoProfile.RegisterPatches(autoCells,()=>{})==0 && autoProfile.Cells.Count==8 && autoProfile.Cells[0].Owned && autoProfile.Cells[0].Seed==123 && !autoProfile.Cells[0].Enabled, "Repeated automatic registration is idempotent and preserves crop records and disabled slots.");
+var rollbackProfile = new HarvestProfile();
+try { rollbackProfile.RegisterPatches(autoCells,()=>throw new IOException("save failed")); throw new Exception("Failed bulk save accepted."); }
+catch(IOException) { Check(rollbackProfile.Cells.Count==0, "Bulk registration rolls back every new slot on persistence failure."); }
+try { GardenRegistration.Nearest(observedPatches,origin+new System.Numerics.Vector3(20,0,0)); throw new Exception("Remote garden accepted."); }
+catch(InvalidOperationException) { passed++; }
+try { GardenRegistration.Nearest(observedPatches.Take(7).ToArray(),origin); throw new Exception("Incomplete garden accepted."); }
+catch(InvalidOperationException) { passed++; }
 var registered = new HarvestProfile();
 var firstCell = new GardenCell { Group = "밭", Index = 0, World = 1, Territory = 2, House = 3, X = 10 };
 var saves = 0;
