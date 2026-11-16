@@ -1,0 +1,14 @@
+{
+  "Author": "ffxiv-tc-port; numbersflow",
+  "Name": "하베스트",
+  "InternalName": "Harvest",
+  "AssemblyVersion": "1.0.0.0",
+  "Description": "화단·화분 재배, 교배와 제작 재료 확보를 위한 하베스트.",
+  "Punchline": "제작 재료와 지정 품목 재배",
+  "DalamudApiLevel": 15,
+  "ApplicableVersion": "any",
+  "CanUnloadAsync": false,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "LoadPriority": 0
+}

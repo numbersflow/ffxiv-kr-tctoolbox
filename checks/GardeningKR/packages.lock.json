@@ -13,7 +13,7 @@
         "resolved": "15.0.0",
         "contentHash": "411vwC8/X8Z/sQ2TI6v3SvOn66xFPeOjFn3Zn+h0d3Ox2t1kFm66AhDvmx/qcMwVrR+Hidxj0dadpQ2dgyXMBQ=="
       },
-      "TCToolbox": {
+      "harvest": {
         "type": "Project",
         "dependencies": {
           "DalamudPackager": "[15.0.0, )"
