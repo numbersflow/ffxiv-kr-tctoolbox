@@ -10,7 +10,7 @@ namespace Harvest.Planning;
 internal sealed partial class HarvestService
 {
     private string search = "", groupName = "텃밭 1", route = "home";
-    private int quantity = 1, cellIndex;
+    private int cellIndex;
     private string configureError = "";
     private string selectedCell = "";
     private bool selectedOnly;
@@ -25,8 +25,15 @@ internal sealed partial class HarvestService
             if (r.TryGetProperty("Character", out var character) && character.GetUInt64() != owner) throw new InvalidOperationException("다른 캐릭터의 설정 요청");
             catalog ??= new();
             var action = r.GetProperty("Action").GetString();
+            uint[]? selection = null;
+            if (action == "SetSelection") {
+                selection = r.GetProperty("Items").Deserialize<uint[]>() ?? [];
+                if (selection.Length > 2048 || selection.Any(id => !catalog.Crops.ContainsKey(id) && !catalog.SeedCrops.ContainsKey(id)))
+                    throw new ArgumentException("재배 품목 선택 범위가 잘못되었습니다.");
+                _ = r.GetProperty("Selected").GetBoolean(); _ = r.GetProperty("Book").GetBoolean();
+            }
             if (visit != null && action is not ("CanGrow" or "GetSettings" or "Register")) {
-                if (action is not ("AddGoal" or "SetBook" or "RemoveGoal" or "RemoveCell" or "Register" or "SetCell")) throw new ArgumentException("Unknown configuration action");
+                if (action is not ("AddGoal" or "SetBook" or "RemoveGoal" or "RemoveCell" or "Register" or "SetCell" or "SetSelection")) throw new ArgumentException("Unknown configuration action");
                 var queued = System.Text.Json.Nodes.JsonNode.Parse(json)!;
                 queued["Character"] = owner;
                 StopOwnedTravel(visit);
@@ -47,7 +54,8 @@ internal sealed partial class HarvestService
                     if (goal == null) Profile.Goals.Add(new() { Item = item, Quantity = target });
                     else { goal.Quantity = target; goal.Enabled = true; goal.Complete = false; }
                 }
-            } else if (action == "RemoveGoal") Profile.Goals.RemoveAll(g => g.Item == r.GetProperty("Item").GetUInt32());
+            } else if (action == "SetSelection") Profile.SelectItems(selection!, r.GetProperty("Selected").GetBoolean(), r.GetProperty("Book").GetBoolean());
+            else if (action == "RemoveGoal") Profile.Goals.RemoveAll(g => g.Item == r.GetProperty("Item").GetUInt32());
             else if (action == "SetCell") Profile.SelectCell(r.GetProperty("Id").GetString() ?? "", r.GetProperty("Selected").GetBoolean());
             else if (action == "RemoveCell") Profile.Cells.RemoveAll(c => c.Id == r.GetProperty("Id").GetString());
             else if (action == "Register") RegisterCell(r.GetProperty("Group").GetString() ?? "", r.GetProperty("Index").GetInt32(), r.GetProperty("Route").GetString() ?? "");
@@ -114,7 +122,6 @@ internal sealed partial class HarvestService
     private void DrawCropSelection()
     {
         ImGui.InputTextWithHint("##harvestSearch", "작물·꽃·씨앗 이름 또는 ID", ref search, 120);
-        ImGui.InputInt("새 목표 수량", ref quantity);
         ImGui.Checkbox("선택한 품목만", ref selectedOnly);
         var profile = CurrentProfile;
         if (catalog == null || profile == null) { ImGui.TextUnformatted("현재 캐릭터의 재배 품목 조회 중"); return; }
@@ -133,7 +140,7 @@ internal sealed partial class HarvestService
                 var chosen = goal?.Enabled == true;
                 ImGui.TableNextRow(); ImGui.TableNextColumn();
                 if (ImGui.Checkbox("##chooseCrop" + id, ref chosen)) Post(chosen
-                    ? new { Action = "AddGoal", Item = id, Quantity = quantity }
+                    ? new { Action = "AddGoal", Item = id, Quantity = Math.Max(1, goal?.Quantity ?? 1) }
                     : (object)new { Action = "RemoveGoal", Item = id });
                 ImGui.TableNextColumn(); ImGui.TextUnformatted(catalog.Names[id]);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("아이템 ID: " + id);

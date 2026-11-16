@@ -74,6 +74,15 @@ public sealed class HarvestProfile
         var cell = Cells.Find(c => c.Id == id) ?? throw new ArgumentException("등록된 화단 칸이 아닙니다.");
         cell.Enabled = selected;
     }
+    public void SelectItems(IEnumerable<uint> items, bool selected, bool book)
+    {
+        foreach (var id in items.Distinct()) {
+            if (book) { if (selected) BookItems.Add(id); else BookItems.Remove(id); }
+            else if (!selected) Goals.RemoveAll(g => g.Item == id);
+            else if (Goals.Find(g => g.Item == id) is { } goal) goal.Enabled = true;
+            else Goals.Add(new() { Item = id, Quantity = 1 });
+        }
+    }
 }
 
 public sealed record Crop(uint Item, uint Seed, string Name, bool Flower, double Hours, uint[] Colors);

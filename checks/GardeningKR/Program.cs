@@ -90,6 +90,19 @@ Check(viewRows.Single(r => r.Item == 200) is { Seed: 200, Flower: true, Hours: 2
 viewProfile.BookItems.Add(100); viewProfile.Goals.Add(new() { Item = 100, Quantity = 9 });
 var combined = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, viewBooks, false).Single(r => r.Item == 100);
 Check(combined is { Selected: true, BookSelected: true, Quantity: 9, Needed: 8, Known: false }, "Direct and book selections are independent and unknown stock must not appear confirmed.");
+viewProfile.Goals[0].Complete = true;
+viewProfile.SelectItems([100, 200, 200], true, false);
+Check(viewProfile.Goals.Count == 2 && viewProfile.Goals.Single(g => g.Item == 100) is { Quantity: 9, Complete: true }, "Select-all preserves existing quantities and completion, and deduplicates items.");
+Check(viewProfile.Goals.Single(g => g.Item == 200).Quantity == 1, "New bulk-selected items use a per-item default of one.");
+viewProfile.SelectItems([200], false, false);
+Check(viewProfile.Goals.Single().Item == 100 && viewProfile.BookItems.Contains(100), "Filtered deselection leaves hidden and book-linked items intact.");
+viewProfile.SelectItems([100, 200], true, true);
+Check(viewProfile.BookItems.SetEquals(new uint[] {100, 200}) && viewProfile.Goals.Single().Quantity == 9, "Bulk book selection cannot overwrite direct targets.");
+viewProfile.SelectItems([200], false, true);
+Check(viewProfile.BookItems.SetEquals(new uint[] {100}), "Bulk book deselection affects only the displayed IDs.");
+var scopedView = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, new Dictionary<uint, int> { [100] = 3 }, true);
+Check(scopedView.Single(r => r.Item == 100) is { Needed: 3, Quantity: 9, BookSelected: true } && viewBooks[100] == 8,
+    "Expansion views change displayed demand without changing all-expansion demand or selections.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 1)]) == 0, "Existing stack capacity can absorb an output.");
 Check(GardenPolicy.RequiredSlots([(1u, 99, 99, 0), (2u, 5, 99, 0)]) == 2, "Crop and crossbred seed use separate capacity.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 0), (1u, 1, 99, 0)]) == 1, "Identical outputs share a stack.");

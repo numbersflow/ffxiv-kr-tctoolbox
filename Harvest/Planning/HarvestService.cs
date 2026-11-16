@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Text.Json;
 using Dalamud.Plugin.Ipc;
@@ -20,6 +21,9 @@ internal sealed partial class HarvestService : IDisposable
     private readonly ICallGateProvider<string, string> configGate;
     private readonly ICallGateProvider<string> protectionGate;
     private readonly ICallGateProvider<string> gardenViewGate;
+    private readonly ICallGateProvider<uint, string> gardenScopeGate;
+    private readonly ConcurrentDictionary<uint, string> gardenScopes = new();
+    private volatile int requestedGardenExpansion = 6;
     private string gardenView = "{\"Available\":false}";
     private bool stockKnown, bookReady;
     private string bookError = "";
@@ -47,6 +51,13 @@ internal sealed partial class HarvestService : IDisposable
         this.config = config; this.garden = garden;
         gardenViewGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetGardenView");
         gardenViewGate.RegisterFunc(() => gardenView);
+        gardenScopeGate = Svc.PluginInterface.GetIpcProvider<uint, string>("Harvest.GetGardenViewForExpansion");
+        gardenScopeGate.RegisterFunc(scope => {
+            if (scope > 6) return "{\"Available\":false,\"Error\":\"잘못된 확장팩\"}";
+            requestedGardenExpansion = (int)scope;
+            return scope == 6 ? gardenView : gardenScopes.GetValueOrDefault(scope)
+                ?? "{\"Available\":false,\"Error\":\"확장팩 제작 재료 계산 중\"}";
+        });
         snapshotGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetWorkflowSnapshot");
         snapshotGate.RegisterFunc(() => snapshot);
         configGate = Svc.PluginInterface.GetIpcProvider<string, string>("Harvest.Configure");
@@ -74,10 +85,14 @@ internal sealed partial class HarvestService : IDisposable
 
     private void Refresh(IFramework framework)
     {
-        if (DateTime.UtcNow < nextRefresh || visit != null) return;
+        if (DateTime.UtcNow < nextRefresh) return;
         nextRefresh = DateTime.UtcNow.AddSeconds(5);
+        if (visit != null) {
+            if (Svc.PlayerState.ContentId == owner) PublishGardenView();
+            return;
+        }
         var current = Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0;
-        if (current != owner) { owner = current; stock.Clear(); books.Clear(); supplies.Clear(); gardenView = "{\"Available\":false}"; }
+        if (current != owner) { owner = current; stock.Clear(); books.Clear(); supplies.Clear(); gardenScopes.Clear(); gardenView = "{\"Available\":false}"; }
         stockKnown = bookReady = false;
         if (owner == 0) { displayProfile = null; snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"접속 대기\"}"; return; }
         while (pendingConfiguration.TryDequeue(out var change)) Configure(change);
@@ -140,10 +155,24 @@ internal sealed partial class HarvestService : IDisposable
     {
         displayProfile = JsonSerializer.Deserialize<HarvestProfile>(JsonSerializer.Serialize(Profile));
         if (catalog == null || owner == 0) return;
-        gardenView = JsonSerializer.Serialize(new { Available = true, Character = owner, Error = error,
+        gardenView = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = 6, Error = error,
             BookReady = bookReady, BookError = bookError,
             Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, books, stockKnown),
             Cells = Profile.Cells, Batch = Profile.Batch });
+        var scope = (uint)requestedGardenExpansion;
+        if (scope >= 6) return;
+        try {
+            using var doc = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<uint, string>("GatherBuddyReborn.GetWorkflowBookMaterials").InvokeFunc(scope));
+            var b = doc.RootElement;
+            if (!b.GetProperty("Available").GetBoolean() || b.GetProperty("Character").GetUInt64() != owner
+                || b.GetProperty("Expansion").GetUInt32() != scope
+                || b.GetProperty("Error").GetString() != "") throw new InvalidOperationException("확장팩 제작 재료 계산 중");
+            var scoped = b.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(), r => r.GetProperty("Needed").GetInt32());
+            gardenScopes[scope] = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = scope, Error = error,
+                BookReady = !b.GetProperty("Pending").GetBoolean(), BookError = b.GetProperty("Pending").GetBoolean() ? "확장팩 제작 재료 계산 중" : "",
+                Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, scoped, stockKnown),
+                Cells = Profile.Cells, Batch = Profile.Batch });
+        } catch (Exception ex) { gardenScopes[scope] = JsonSerializer.Serialize(new { Available = false, Error = ex.Message }); }
     }
 
     private void Replan()
@@ -236,5 +265,6 @@ internal sealed partial class HarvestService : IDisposable
         endpoint.Dispose();
         snapshotGate.UnregisterFunc(); configGate.UnregisterFunc(); protectionGate.UnregisterFunc();
         gardenViewGate.UnregisterFunc();
+        gardenScopeGate.UnregisterFunc();
     }
 }
