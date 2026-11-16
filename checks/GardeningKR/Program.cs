@@ -193,6 +193,26 @@ Check(CropNameMatching.Resolve("알 수 없는 꽃이", new Dictionary<string, u
 using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV - KOREA\game\sqpack",
     new Lumina.LuminaOptions { PanicOnSheetChecksumMismatch = false, DefaultExcelLanguage = (Lumina.Data.Language)7 })) {
     var catalog = new Catalog(game.GetExcelSheet<Lumina.Excel.Sheets.Item>(), game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>());
+    (Dictionary<uint,int> Supplies, string Error) Prepare(HarvestProfile p, params uint[] roots)
+    {
+        var service = (HarvestService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HarvestService));
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        void Set(string name, object value) => typeof(HarvestService).GetField(name,flags)!.SetValue(service,value);
+        Set("owner",10ul); Set("config",new Configuration { Profiles = new() { [10] = p } }); Set("catalog",catalog);
+        Set("bookCache",new GardenBookCache()); Set("error","");
+        Set("stock",catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct().ToDictionary(id=>id,id=>new Stock(0,0,roots.Contains(id))));
+        typeof(HarvestService).GetMethod("Replan",flags)!.Invoke(service,null);
+        return ((Dictionary<uint,int>)typeof(HarvestService).GetField("supplies",flags)!.GetValue(service)!,
+            (string)typeof(HarvestService).GetField("error",flags)!.GetValue(service)!);
+    }
+    var noFacility = Prepare(new() { Goals=[new() { Item=14071, Quantity=1 }] },14007);
+    Check(noFacility.Supplies.Count == 0, "Actual Replan must not procure seeds when no target cells are registered.");
+    var wrongFacility = Prepare(new() { Goals=[new() { Item=14071, Quantity=1 }], Cells=[new() { Kind="plot" }] },14007);
+    Check(wrongFacility.Supplies.Count == 0, "Actual Replan must not buy flower seeds when only outdoor beds are registered.");
+    var oneCrossCell = Prepare(new() { Goals=[new() { Item=7755, Quantity=1 }], Cells=[new() { Kind="plot" }] },7744,7742);
+    Check(oneCrossCell.Supplies.Count == 0, "Actual Replan requires two adjacent cells before preparing crossbreeding parents.");
+    var directSeed = Prepare(new() { Goals=[new() { Item=14007, Quantity=2 }] },14007);
+    Check(directSeed.Supplies.GetValueOrDefault(14007u) == 2, "Explicit raw seed targets can still be procured without a garden.");
     Check(catalog.SeedCrops.Count == 108 && catalog.Crosses.Count == 3768, "Installed Korean sheets must validate every embedded crossbreeding row.");
     Check(catalog.Crops[14071].Seed == 14007 && catalog.Crops[14071].Hours == 24, "Oldrose growth data must map to the installed Korean seed.");
     Check(catalog.Crops.Values.Any(c => c.Flower && c.Colors.Length == 3), "Mixed flower colors need all three pomaces.");

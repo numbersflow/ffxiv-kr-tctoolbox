@@ -129,7 +129,7 @@ internal sealed partial class HarvestService : IDisposable
             snapshot = JsonSerializer.Serialize(new { Available = true, Character = owner, Ready = ready,
                 Supply = supplies.Where(p => !HasCareDue() && stock.GetValueOrDefault(p.Key)?.Inventory < p.Value)
                     .Select(p => new { ItemId = p.Key, TargetCount = p.Value }).FirstOrDefault(),
-                Detail = Profile.Batch == null ? "필요한 재배 없음" : catalog.Names.GetValueOrDefault(Profile.Batch.Output) ?? "재배",
+                Detail = Profile.Batch == null ? (error.Length > 0 ? error : "필요한 재배 없음") : catalog.Names.GetValueOrDefault(Profile.Batch.Output) ?? "재배",
                 Goals = Profile.Goals, BookItems = Profile.BookItems, Growable = catalog.Crops.Keys,
                 Searchable = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         } catch (Exception ex) {
@@ -206,25 +206,31 @@ internal sealed partial class HarvestService : IDisposable
             var needed = isSeed ? quantity : 1;
             var plan = SeedPlanner.Build(seed, needed, stock, catalog.Crosses);
             if (plan.Error.Length > 0) { error = plan.Error; continue; }
-            foreach (var (id, amount) in plan.Supplies) supplies[id] = Math.Max(supplies.GetValueOrDefault(id), amount);
             var stage = plan.Stages.FirstOrDefault(s => stock.GetValueOrDefault(s.Output)?.Total < s.Required || !stock.ContainsKey(s.Output));
             GardenCell[] selected;
             if (stage != null) {
                 selected = Profile.Cells.Where(c => c.Enabled && c.Kind == "plot" && !c.Owned)
                     .GroupBy(c => (c.Group, c.House, c.World, c.Territory)).SelectMany(g => g.SelectMany(a => g.Where(b => (a.Index + 1) % 8 == b.Index)
                         .Select(b => new[] { a, b }))).FirstOrDefault() ?? [];
-                if (selected.Length != 2) continue;
+                if (selected.Length != 2) { error = "교배할 같은 텃밭의 인접한 재배 칸 2개를 등록·선택해야 합니다."; continue; }
                 Profile.Batch = new() { Goal = item, Output = stage.Output, Required = stage.Required,
                     SeedA = stage.A, SeedB = stage.B, Cross = true, Cells = selected.Select(c => c.Id).ToList() };
-            } else if (isSeed) continue;
+            } else if (isSeed) {
+                foreach (var (id, amount) in plan.Supplies) supplies[id] = Math.Max(supplies.GetValueOrDefault(id), amount);
+                continue;
+            }
             else {
                 selected = Profile.Cells.Where(c => c.Enabled && !c.Owned && (!product!.Flower || c.Kind == "pot"))
                     .OrderBy(c => c.Kind == "pot" ? 0 : 1).Take(Math.Min(quantity - stock.GetValueOrDefault(item)!.Total,
                         stock.GetValueOrDefault(seed) is { CanProcure: false } held ? Math.Min(24, held.Total) : 24)).ToArray();
-                if (selected.Length == 0) continue;
+                if (selected.Length == 0) {
+                    error = product!.Flower ? "꽃을 재배할 실내 화분 칸을 등록·선택해야 합니다." : "재배할 칸을 등록·선택해야 합니다.";
+                    continue;
+                }
                 Profile.Batch = new() { Goal = item, Output = item, Required = quantity, SeedA = seed, Cells = selected.Select(c => c.Id).ToList() };
             }
             for (var i = 0; i < selected.Length; i++) selected[i].Seed = i % 2 == 1 && Profile.Batch.Cross ? Profile.Batch.SeedB : Profile.Batch.SeedA;
+            error = "";
             ReserveBatch(Profile.Batch); dirty = true; break;
         }
         if (dirty) config.Save();
