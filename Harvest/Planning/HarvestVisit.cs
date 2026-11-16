@@ -21,6 +21,7 @@ internal sealed partial class HarvestService
         public bool Cancel, Paused, Move, Travel, Scanning, Verifying, CareOnly;
         public bool RouteWalking;
         public HashSet<string> WalkedRoutes = [];
+        public HashSet<string> HomeArrivals = [];
         public int ReservedSlots = 8;
         public DateTime Started = DateTime.UtcNow, StepAt = DateTime.UtcNow, ScanAt, TravelAt;
         public DateTime PauseAt;
@@ -79,16 +80,7 @@ internal sealed partial class HarvestService
             if (DateTime.UtcNow - work.StepAt > TimeSpan.FromMinutes(3)) throw new InvalidOperationException("시설 접근·조작 시간 초과");
             if (WalkingRouteInProgress(work, cell, out var routePhase)) return Busy(work, routePhase);
             if (!AtCell(cell)) {
-                if (work.Travel) {
-                    if (Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy").InvokeFunc()) return Busy(work, "주택 이동");
-                    if (DateTime.UtcNow - work.TravelAt < TimeSpan.FromSeconds(10)) return Busy(work, "주택 이동 확인");
-                    throw new InvalidOperationException("주택 이동 결과가 등록 위치와 다릅니다.");
-                }
-                if (ExternalNav.TryGetActiveMover(out _)) return Busy(work, "외부 이동 종료 대기");
-                if (string.IsNullOrWhiteSpace(cell.Travel)) throw new InvalidOperationException("Lifestream 경로 미등록");
-                work.Travel = true; work.TravelAt = DateTime.UtcNow;
-                Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction(cell.Travel);
-                return Busy(work, "주택 이동 시작");
+                throw new InvalidOperationException("개인주택 텔레포트 결과가 등록한 재배 시설의 위치와 다릅니다.");
             }
             work.Travel = false;
             if (work.Object == 0) {
@@ -246,6 +238,7 @@ internal sealed partial class HarvestService
     }
     private void StopOwnedTravel(Visit work)
     {
+        work.HomeArrivals.Clear(); work.WalkedRoutes.Clear();
         if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
         if (work.Travel || work.RouteWalking) {
             var gate = Svc.PluginInterface.GetIpcSubscriber<object>("Lifestream.Abort");

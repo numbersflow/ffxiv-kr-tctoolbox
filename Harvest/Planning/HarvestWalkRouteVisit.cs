@@ -9,12 +9,23 @@ internal sealed partial class HarvestService
 {
     private bool WalkingRouteInProgress(Visit work, GardenCell cell, out string phase)
     {
+        phase = "개인주택 텔레포트";
+        var busy = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
+        if (!work.HomeArrivals.Contains(cell.Group)) {
+            if (!work.Travel) {
+                if (busy.InvokeFunc() || ExternalNav.TryGetActiveMover(out _)) return true;
+                work.Travel = true; work.TravelAt = DateTime.UtcNow;
+                Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction("home");
+                return true;
+            }
+            if (busy.InvokeFunc() || DateTime.UtcNow - work.TravelAt < TimeSpan.FromSeconds(1)) return true;
+            work.Travel = false; work.HomeArrivals.Add(cell.Group);
+        }
         phase = "저장한 도보 경로 이동";
         if (!Profile.WalkRoutes.TryGetValue(cell.Group, out var route)) return false;
         if (!route.Matches(cell)) throw new InvalidOperationException("시설과 저장한 도보 경로의 주택·구역이 다릅니다.");
         var position = Svc.Objects.LocalPlayer?.Position ?? throw new InvalidOperationException("캐릭터 위치 확인 대기");
         if (work.WalkedRoutes.Contains(cell.Group) && AtCell(cell)) return false;
-        var busy = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
         if (work.RouteWalking) {
             if (busy.InvokeFunc()) return true;
             work.RouteWalking = false;
@@ -24,21 +35,8 @@ internal sealed partial class HarvestService
             return false;
         }
         var join = route.CanJoin(CurrentRouteLocation(), position);
-        if (work.Travel) {
-            phase = "Lifestream 이동 후 도보 경로 연결";
-            if (busy.InvokeFunc()) return true;
-            if (!join) {
-                if (DateTime.UtcNow - work.TravelAt < TimeSpan.FromSeconds(10)) return true;
-                throw new InvalidOperationException("Lifestream 도착지와 저장한 도보 경로가 다릅니다. 도착 지점부터 다시 기록하세요.");
-            }
-            work.Travel = false;
-        }
         if (!join) {
-            phase = "도보 경로 출발점으로 이동";
-            if (ExternalNav.TryGetActiveMover(out _)) return true;
-            work.Travel = true; work.TravelAt = DateTime.UtcNow;
-            Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction(route.Travel);
-            return true;
+            throw new InvalidOperationException("개인주택 텔레포트 도착지와 저장한 도보 경로가 다릅니다. 다른 위치에서 걸어서 연결하지 않습니다.");
         }
         var points = CornerRoute.Remaining(route.Points, position)!;
         if (points.Count == 0) {
