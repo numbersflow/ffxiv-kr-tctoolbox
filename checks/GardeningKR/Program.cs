@@ -8,6 +8,7 @@ using Harvest;
 using Harvest.Core;
 using Harvest.Planning;
 using System.Collections.Generic;
+using System.Numerics;
 
 AssemblyLoadContext.Default.Resolving += (_, name) =>
 {
@@ -103,6 +104,56 @@ Check(viewProfile.BookItems.SetEquals(new uint[] {100}), "Bulk book deselection 
 var scopedView = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, new Dictionary<uint, int> { [100] = 3 }, true);
 Check(scopedView.Single(r => r.Item == 100) is { Needed: 3, Quantity: 9, BookSelected: true } && viewBooks[100] == 8,
     "Expansion views change displayed demand without changing all-expansion demand or selections.");
+var straight = Enumerable.Range(0, 101).Select(i => new Vector3(i / 10f, 0, 0)).ToArray();
+Check(CornerRoute.Simplify(straight).Count == 2, "Straight walks store only start and destination.");
+Vector3[] turn = [new(0,0,0), new(1,0,0), new(2,0,0), new(2,0,1), new(2,0,2)];
+var corners = CornerRoute.Simplify(turn);
+Check(corners.Count == 3 && corners[1].Position == new Vector3(2,0,0), "A bend is retained in the saved route.");
+Check(CornerRoute.Simplify([new(0,0,0), new(2,0,0), new(2,2,0), new(4,2,0)]).Count == 4, "Height-changing corners cannot be flattened.");
+Check(CornerRoute.Simplify([new(0,0,0), new(2,0,0), new(0,0,0)]).Count == 3, "Returning to the start retains the turnaround.");
+var remaining = CornerRoute.Remaining(corners, new(1,0,0))!;
+Check(remaining.Count == 3 && remaining[1] == new Vector3(2,0,0), "Resume from a segment retains the next corner instead of skipping to the end.");
+Check(CornerRoute.Remaining(corners, new(50,0,50)) == null, "An unrelated position cannot join a saved path.");
+Check(CornerRoute.Remaining(corners, new(2,0,2))!.Count == 0, "A player already at the destination does not replay the route.");
+Check(CornerRoute.Remaining(corners, new(float.NaN,0,0)) == null, "Invalid positions cannot reach the movement IPC.");
+var outdoor = new GardenRouteLocation(1, 339, 0, 0);
+var destination = outdoor with { House = 123 };
+ManualGardenRoute Recording(string token = "one") => new(token, 10, "밭1", "home", outdoor, Vector3.Zero, 0);
+var recording = Recording();
+Check(!recording.Touch("wrong", 10, 1000) && !recording.Touch("one", 11, 1000), "Other tokens and characters cannot renew a recording lease.");
+Check(recording.Sample(10, outdoor, new(1,0,0), 1000) && recording.Touch("one",10,1000), "The owner can record and renew its own session.");
+Check(recording.Sample(10, destination, new(2,0,0), 2000), "Walking from the street into the plot stays in the same route.");
+var savedRoute = recording.Finish("one", 10, destination, new(3,0,0), 2000);
+Check(!recording.Active && savedRoute.Points.Count == 2 && savedRoute.Start.House == 0 && savedRoute.DestinationHouse == 123,
+    "Saving keeps endpoint ownership and only reduced vertices.");
+var lease = Recording(); lease.Sample(10, outdoor, new(1,0,0), 6001);
+Check(!lease.Active && lease.Error.Length > 0, "A reload or lost UI heartbeat cancels unsaved recording.");
+var ward = Recording(); ward.Sample(10, outdoor with { Ward = 1 }, new(1,0,0), 1000);
+Check(!ward.Active, "Ward changes invalidate even identical territory IDs and coordinates.");
+var division = Recording(); division.Sample(10, outdoor with { Division = 1 }, new(1,0,0),1000);
+Check(!division.Active, "The main ward and its subdivision cannot share an unverified route.");
+var teleport = Recording(); teleport.Sample(10, outdoor, new(50,0,0), 1000);
+Check(!teleport.Active, "Teleport-sized discontinuities cannot become walk segments.");
+var characterSwap = Recording(); characterSwap.Sample(11, outdoor, new(1,0,0), 1000);
+Check(!characterSwap.Active, "A character change never appends to the previous route.");
+var routeProfile = new HarvestProfile { Cells = [new() { Group="밭1", World=1, Territory=339, House=123 }] };
+routeProfile.WalkRoutes["밭1"] = savedRoute;
+var cancelled = Recording("two"); cancelled.Cancel("cancel");
+try { routeProfile.SaveWalkRoute(cancelled,"two",10,destination,new(1,0,0),1000); throw new InvalidDataException("Cancelled recording saved."); }
+catch (InvalidOperationException) { passed++; }
+Check(ReferenceEquals(routeProfile.WalkRoutes["밭1"],savedRoute), "Failed replacement preserves the previous route.");
+var replacement = Recording("three"); replacement.Sample(10,outdoor,new(1,0,0),1000);
+var newRoute = routeProfile.SaveWalkRoute(replacement,"three",10,destination,new(2,0,0),1000);
+Check(ReferenceEquals(routeProfile.WalkRoutes["밭1"],newRoute) && newRoute.Matches(routeProfile.Cells[0]), "Successful recording replaces the named route and binds only the matching house.");
+Check(!newRoute.CanJoin(outdoor with { Ward=1 },Vector3.Zero), "Replay must reject a different ward, even at the same position.");
+var restoredRoute = JsonConvert.DeserializeObject<HarvestProfile>(JsonConvert.SerializeObject(routeProfile))!;
+Check(restoredRoute.WalkRoutes["밭1"].Points.Count == 2 && restoredRoute.WalkRoutes["밭1"].Start.World == 1, "Vertices and context survive plugin reload.");
+Check(new HarvestProfile().WalkRoutes.Count == 0, "Existing configurations remain valid without recorded routes.");
+var io = new ManualGardenRoute("io",10,"밭1","new-home",outdoor,Vector3.Zero,0); io.Sample(10,outdoor,new(1,0,0),1000);
+try { routeProfile.SaveWalkRoute(io,"io",10,destination,new(2,0,0),1000,() => throw new IOException("disk")); throw new InvalidDataException("Failed persistence accepted."); }
+catch (IOException) { passed++; }
+Check(ReferenceEquals(routeProfile.WalkRoutes["밭1"],newRoute) && routeProfile.Cells[0].Travel == "home" && !io.Active,
+    "Failed persistence restores both the previous vertices and the linked travel command.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 1)]) == 0, "Existing stack capacity can absorb an output.");
 Check(GardenPolicy.RequiredSlots([(1u, 99, 99, 0), (2u, 5, 99, 0)]) == 2, "Crop and crossbred seed use separate capacity.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 0), (1u, 1, 99, 0)]) == 1, "Identical outputs share a stack.");

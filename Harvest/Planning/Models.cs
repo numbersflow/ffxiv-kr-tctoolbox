@@ -66,6 +66,24 @@ public sealed class HarvestProfile
     public List<HarvestGoal> Goals { get; set; } = [];
     public HashSet<uint> BookItems { get; set; } = [];
     public List<GardenCell> Cells { get; set; } = [];
+    public Dictionary<string, GardenWalkRoute> WalkRoutes { get; set; } = [];
+    public GardenWalkRoute SaveWalkRoute(ManualGardenRoute recording, string token, ulong owner,
+        GardenRouteLocation location, Vector3 position, long now, Action? persist = null)
+    {
+        var route = recording.Finish(token, owner, location, position, now);
+        WalkRoutes.TryGetValue(route.Group, out var previous);
+        var travel = Cells.Where(route.Matches).ToDictionary(c => c.Id, c => c.Travel);
+        WalkRoutes[route.Group] = route;
+        foreach (var cell in Cells) if (route.Matches(cell)) cell.Travel = route.Travel;
+        try { persist?.Invoke(); }
+        catch (Exception ex) {
+            if (previous == null) WalkRoutes.Remove(route.Group); else WalkRoutes[route.Group] = previous;
+            foreach (var cell in Cells) if (travel.TryGetValue(cell.Id, out var oldTravel)) cell.Travel = oldTravel;
+            recording.Cancel("경로 파일 저장 실패 · " + ex.Message);
+            throw;
+        }
+        return route;
+    }
     public GardenBatch? Batch { get; set; }
     public uint Soil { get; set; } = 7766;
     public DateTime RetryAt { get; set; }

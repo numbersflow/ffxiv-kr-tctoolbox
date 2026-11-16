@@ -19,6 +19,8 @@ internal sealed partial class HarvestService
         public GardenCell? Cell;
         public ulong Object;
         public bool Cancel, Paused, Move, Travel, Scanning, Verifying, CareOnly;
+        public bool RouteWalking;
+        public HashSet<string> WalkedRoutes = [];
         public int ReservedSlots = 8;
         public DateTime Started = DateTime.UtcNow, StepAt = DateTime.UtcNow, ScanAt, TravelAt;
         public DateTime PauseAt;
@@ -34,7 +36,7 @@ internal sealed partial class HarvestService
             CareOnly = arguments.TryGetProperty("CareOnly", out var care) && care.GetBoolean(),
             ReservedSlots = arguments.TryGetProperty("ReservedFreeSlots", out var slots) ? Math.Clamp(slots.GetInt32(), 0, 139) : 8 };
         return new(() => {
-            if (work.Owner == 0 || work.Owner != Svc.PlayerState.ContentId || Profile.Batch == null || !HasDueVisit()) return false;
+            if (work.Owner == 0 || work.Owner != Svc.PlayerState.ContentId || routeRecording?.Active == true || Profile.Batch == null || !HasDueVisit()) return false;
             config.GardensWork.AutoLoopEnabled = false;
             garden.Enable();
             if (!garden.IsEnabled) return false;
@@ -44,7 +46,13 @@ internal sealed partial class HarvestService
             () => { work.Cancel = true; StopOwnedTravel(work); garden.Disable(); visit = null; config.Save(); },
             () => { work.Cancel = true; garden.Disable(); visit = null; config.Save(); },
             (paused, _) => {
-                if (paused && !work.Paused) { work.PauseAt = DateTime.UtcNow; StopOwnedTravel(work); }
+                if (paused && !work.Paused) {
+                    work.PauseAt = DateTime.UtcNow;
+                    var travelPause = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsWorkflowPaused");
+                    if (travelPause.HasFunction && travelPause.InvokeFunc()) {
+                        if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
+                    } else StopOwnedTravel(work);
+                }
                 if (!paused && work.Paused) work.StepAt += DateTime.UtcNow - work.PauseAt;
                 work.Paused = paused;
             },
@@ -68,6 +76,7 @@ internal sealed partial class HarvestService
             }
             var cell = work.Cell;
             if (DateTime.UtcNow - work.StepAt > TimeSpan.FromMinutes(3)) throw new InvalidOperationException("시설 접근·조작 시간 초과");
+            if (WalkingRouteInProgress(work, cell, out var routePhase)) return Busy(work, routePhase);
             if (!AtCell(cell)) {
                 if (work.Travel) {
                     if (Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy").InvokeFunc()) return Busy(work, "주택 이동");
@@ -235,10 +244,10 @@ internal sealed partial class HarvestService
     private void StopOwnedTravel(Visit work)
     {
         if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
-        if (work.Travel) {
+        if (work.Travel || work.RouteWalking) {
             var gate = Svc.PluginInterface.GetIpcSubscriber<object>("Lifestream.Abort");
             if (gate.HasAction) gate.InvokeAction();
-            work.Travel = false;
+            work.Travel = work.RouteWalking = false;
         }
     }
     private void FinishCell(Visit work)

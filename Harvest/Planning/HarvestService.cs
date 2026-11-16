@@ -49,6 +49,8 @@ internal sealed partial class HarvestService : IDisposable
     public HarvestService(Configuration config, AutoGardensWork garden)
     {
         this.config = config; this.garden = garden;
+        routeRecordingGate = Svc.PluginInterface.GetIpcProvider<string, string>("Harvest.RouteRecordingV1");
+        routeRecordingGate.RegisterFunc(request => IpcFrameworkGate.Get("Harvest.RouteRecordingV1", () => RouteRecordingRequest(request), "{\"Accepted\":false}"));
         gardenViewGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetGardenView");
         gardenViewGate.RegisterFunc(() => gardenView);
         gardenScopeGate = Svc.PluginInterface.GetIpcProvider<uint, string>("Harvest.GetGardenViewForExpansion");
@@ -67,8 +69,9 @@ internal sealed partial class HarvestService : IDisposable
             () => JsonSerializer.Serialize(new { Available = owner != 0, Character = owner, Items = Reservations() }), "{\"Available\":false}"));
         endpoint = new(Svc.PluginInterface, Svc.Framework, "Harvest", CreateWork,
             () => Svc.ClientState.IsLoggedIn && !AutomationGate.TryGetBusyReason(out _),
-            () => visit != null || garden.IsBusy, () => Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0);
+            () => visit != null || garden.IsBusy || routeRecording?.Active == true, () => Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0);
         Svc.Framework.Update += Refresh;
+        Svc.Framework.Update += RecordRoutePosition;
     }
 
     private Dictionary<uint, int> Reservations()
@@ -158,7 +161,7 @@ internal sealed partial class HarvestService : IDisposable
         gardenView = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = 6, Error = error,
             BookReady = bookReady, BookError = bookError,
             Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, books, stockKnown),
-            Cells = Profile.Cells, Batch = Profile.Batch });
+            Cells = Profile.Cells, Batch = Profile.Batch, Routes = Profile.WalkRoutes.Values });
         var scope = (uint)requestedGardenExpansion;
         if (scope >= 6) return;
         try {
@@ -171,7 +174,7 @@ internal sealed partial class HarvestService : IDisposable
             gardenScopes[scope] = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = scope, Error = error,
                 BookReady = !b.GetProperty("Pending").GetBoolean(), BookError = b.GetProperty("Pending").GetBoolean() ? "확장팩 제작 재료 계산 중" : "",
                 Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, scoped, stockKnown),
-                Cells = Profile.Cells, Batch = Profile.Batch });
+                Cells = Profile.Cells, Batch = Profile.Batch, Routes = Profile.WalkRoutes.Values });
         } catch (Exception ex) { gardenScopes[scope] = JsonSerializer.Serialize(new { Available = false, Error = ex.Message }); }
     }
 
@@ -261,10 +264,13 @@ internal sealed partial class HarvestService : IDisposable
     public void Dispose()
     {
         disposed = true;
+        routeRecording?.Cancel("플러그인 재로드로 기록 취소");
+        Svc.Framework.Update -= RecordRoutePosition;
         Svc.Framework.Update -= Refresh;
         endpoint.Dispose();
         snapshotGate.UnregisterFunc(); configGate.UnregisterFunc(); protectionGate.UnregisterFunc();
         gardenViewGate.UnregisterFunc();
         gardenScopeGate.UnregisterFunc();
+        routeRecordingGate.UnregisterFunc();
     }
 }
