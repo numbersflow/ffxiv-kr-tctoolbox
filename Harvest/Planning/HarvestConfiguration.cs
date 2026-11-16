@@ -54,7 +54,7 @@ internal sealed partial class HarvestService
             else if (action == "GetSettings") return JsonSerializer.Serialize(new { Accepted = true, Character = owner, Profile });
             else if (action != "CanGrow") throw new ArgumentException("Unknown Harvest configuration action");
             config.Save(); nextRefresh = DateTime.MinValue;
-            displayProfile = JsonSerializer.Deserialize<HarvestProfile>(JsonSerializer.Serialize(Profile));
+            PublishGardenView();
             return "{\"Accepted\":true}";
         } catch (Exception ex) { return JsonSerializer.Serialize(new { Accepted = false, Error = ex.Message }); }
     }

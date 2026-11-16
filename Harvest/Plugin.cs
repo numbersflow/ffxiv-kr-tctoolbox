@@ -54,7 +54,12 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Log.Information("Harvest API 15 loaded; gardening-only workflow worker.");
     }
 
-    public void OpenMainWindow() => open = true;
+    public void OpenMainWindow()
+    {
+        var workflow = Svc.PluginInterface.GetIpcSubscriber<object>("WorkflowOrchestrator.OpenGardens");
+        if (workflow.HasAction) { workflow.InvokeAction(); return; }
+        open = true;
+    }
 
     private static Configuration LoadLegacyConfig()
     {

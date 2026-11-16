@@ -19,7 +19,11 @@ internal sealed partial class HarvestService : IDisposable
     private readonly ICallGateProvider<string> snapshotGate;
     private readonly ICallGateProvider<string, string> configGate;
     private readonly ICallGateProvider<string> protectionGate;
-    private readonly ICallGateProvider<object> gardenUiGate;
+    private readonly ICallGateProvider<string> gardenViewGate;
+    private string gardenView = "{\"Available\":false}";
+    private bool stockKnown, bookReady;
+    private string bookError = "";
+    private bool bookViewVerified;
     private Dictionary<uint, Stock> stock = [];
     private Dictionary<uint, int> books = [];
     private Dictionary<uint, int> supplies = [];
@@ -41,9 +45,8 @@ internal sealed partial class HarvestService : IDisposable
     public HarvestService(Configuration config, AutoGardensWork garden)
     {
         this.config = config; this.garden = garden;
-        // Workflow invokes this only from its ImGui draw callback, using the same cached view.
-        gardenUiGate = Svc.PluginInterface.GetIpcProvider<object>("Harvest.DrawGardenUiV1");
-        gardenUiGate.RegisterAction(Draw);
+        gardenViewGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetGardenView");
+        gardenViewGate.RegisterFunc(() => gardenView);
         snapshotGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetWorkflowSnapshot");
         snapshotGate.RegisterFunc(() => snapshot);
         configGate = Svc.PluginInterface.GetIpcProvider<string, string>("Harvest.Configure");
@@ -74,7 +77,8 @@ internal sealed partial class HarvestService : IDisposable
         if (DateTime.UtcNow < nextRefresh || visit != null) return;
         nextRefresh = DateTime.UtcNow.AddSeconds(5);
         var current = Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0;
-        if (current != owner) { owner = current; stock.Clear(); books.Clear(); supplies.Clear(); }
+        if (current != owner) { owner = current; stock.Clear(); books.Clear(); supplies.Clear(); gardenView = "{\"Available\":false}"; }
+        stockKnown = bookReady = false;
         if (owner == 0) { displayProfile = null; snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"접속 대기\"}"; return; }
         while (pendingConfiguration.TryDequeue(out var change)) Configure(change);
         try {
@@ -83,6 +87,7 @@ internal sealed partial class HarvestService : IDisposable
                 catalog = new();
                 GardenCropData.AddKnownCropNames(catalog.Crops.Values.Select(c => (c.Name, c.Item)));
             }
+            RefreshGardenBooks();
             var ids = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Concat(new uint[] { Profile.Soil, 14011, 14012, 14013 })
                 .Where(i => i > 0).Distinct().ToArray();
             using var response = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<string, string>("GatherBuddyReborn.GetHarvestStock")
@@ -92,14 +97,8 @@ internal sealed partial class HarvestService : IDisposable
                 || !root.GetProperty("RetainerKnown").GetBoolean()) throw new InvalidOperationException("가방·집사 재고 확인 대기");
             stock = root.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(),
                 r => new Stock(r.GetProperty("Inventory").GetInt32(), r.GetProperty("Retainer").GetInt32(), r.GetProperty("CanProcure").GetBoolean()));
-            if (Profile.BookItems.Count > 0) {
-                using var book = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<string>("GatherBuddyReborn.GetHarvestBookMaterials").InvokeFunc());
-                var b = book.RootElement;
-                if (!b.GetProperty("Available").GetBoolean() || b.GetProperty("Character").GetUInt64() != owner
-                    || b.GetProperty("Pending").GetBoolean() || b.GetProperty("Error").GetString() != "")
-                    throw new InvalidOperationException("전체 제작수첩 재료 계산 대기");
-                books = b.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(), r => r.GetProperty("Needed").GetInt32());
-            }
+            stockKnown = true;
+            if (Profile.BookItems.Count > 0 && !bookReady) throw new InvalidOperationException(bookError);
             error = "";
             Replan();
             var ready = Profile.RetryAt <= DateTime.UtcNow && (supplies.Any(p => stock.GetValueOrDefault(p.Key)?.Inventory < p.Value)
@@ -117,7 +116,34 @@ internal sealed partial class HarvestService : IDisposable
             snapshot = JsonSerializer.Serialize(new { Available = care, Character = owner, Ready = care,
                 CareOnly = care, Supply = (object?)null, Error = error, Growable = catalog?.Crops.Keys,
                 Searchable = catalog?.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
-        } finally { displayProfile = JsonSerializer.Deserialize<HarvestProfile>(JsonSerializer.Serialize(Profile)); }
+        } finally { PublishGardenView(); }
+    }
+
+    private void RefreshGardenBooks()
+    {
+        try {
+            using var doc = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<string>("GatherBuddyReborn.GetHarvestBookMaterials").InvokeFunc());
+            var b = doc.RootElement;
+            if (!b.GetProperty("Available").GetBoolean() || b.GetProperty("Character").GetUInt64() != owner
+                || b.GetProperty("Pending").GetBoolean() || b.GetProperty("Error").GetString() != "")
+                throw new InvalidOperationException("전체 제작수첩 재료 계산 중");
+            books = b.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(), r => r.GetProperty("Needed").GetInt32());
+            bookReady = true; bookError = "";
+            if (!bookViewVerified) {
+                bookViewVerified = true;
+                Svc.Log.Information($"Garden book materials ready: materials={books.Count}, gardenItems={books.Count(p => p.Value > 0 && (catalog!.Crops.ContainsKey(p.Key) || catalog.SeedCrops.ContainsKey(p.Key)))}");
+            }
+        } catch (Exception ex) { bookError = ex.Message; bookReady = false; }
+    }
+
+    private void PublishGardenView()
+    {
+        displayProfile = JsonSerializer.Deserialize<HarvestProfile>(JsonSerializer.Serialize(Profile));
+        if (catalog == null || owner == 0) return;
+        gardenView = JsonSerializer.Serialize(new { Available = true, Character = owner, Error = error,
+            BookReady = bookReady, BookError = bookError,
+            Items = GardenView.Items(Profile, catalog.Crops, catalog.SeedCrops, stock, books, stockKnown),
+            Cells = Profile.Cells, Batch = Profile.Batch });
     }
 
     private void Replan()
@@ -209,6 +235,6 @@ internal sealed partial class HarvestService : IDisposable
         Svc.Framework.Update -= Refresh;
         endpoint.Dispose();
         snapshotGate.UnregisterFunc(); configGate.UnregisterFunc(); protectionGate.UnregisterFunc();
-        gardenUiGate.UnregisterAction();
+        gardenViewGate.UnregisterFunc();
     }
 }

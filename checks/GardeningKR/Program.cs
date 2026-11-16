@@ -79,6 +79,17 @@ try { profile.SelectCell("other-character-cell", false); throw new InvalidDataEx
 catch (ArgumentException) { passed++; }
 var selectedProfile = JsonConvert.DeserializeObject<HarvestProfile>(JsonConvert.SerializeObject(profile))!;
 Check(selectedProfile.Cells.All(c => c.Enabled) && selectedProfile.Cells[0].Pending == "Harvest", "Cell choices and pending actions survive reload together.");
+var viewCrops = new Dictionary<uint, Crop> { [100] = new(100, 200, "꽃", true, 24, []) };
+var viewSeeds = new Dictionary<uint, uint> { [200] = 100 };
+var viewStock = new Dictionary<uint, Stock> { [100] = new(2, 3, false), [200] = new(1, 0, true) };
+var viewBooks = new Dictionary<uint, int> { [100] = 8 };
+var viewProfile = new HarvestProfile();
+var viewRows = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, viewBooks, true);
+Check(viewRows.Single(r => r.Item == 100) is { Seed: 200, Needed: 8, BookSelected: false, Inventory: 2, Retainer: 3, Known: true }, "Book candidates and seed icon IDs must be visible before any goal is selected.");
+Check(viewRows.Single(r => r.Item == 200) is { Seed: 200, Flower: true, Hours: 24 }, "Seed rows retain their own icon and plant conditions.");
+viewProfile.BookItems.Add(100); viewProfile.Goals.Add(new() { Item = 100, Quantity = 9 });
+var combined = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, viewBooks, false).Single(r => r.Item == 100);
+Check(combined is { Selected: true, BookSelected: true, Quantity: 9, Needed: 8, Known: false }, "Direct and book selections are independent and unknown stock must not appear confirmed.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 1)]) == 0, "Existing stack capacity can absorb an output.");
 Check(GardenPolicy.RequiredSlots([(1u, 99, 99, 0), (2u, 5, 99, 0)]) == 2, "Crop and crossbred seed use separate capacity.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 0), (1u, 1, 99, 0)]) == 1, "Identical outputs share a stack.");
@@ -90,6 +101,10 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
     Check(catalog.SeedCrops.Count == 108 && catalog.Crosses.Count == 3768, "Installed Korean sheets must validate every embedded crossbreeding row.");
     Check(catalog.Crops[14071].Seed == 14007 && catalog.Crops[14071].Hours == 24, "Oldrose growth data must map to the installed Korean seed.");
     Check(catalog.Crops.Values.Any(c => c.Flower && c.Colors.Length == 3), "Mixed flower colors need all three pomaces.");
+    var actualView = GardenView.Items(new(), catalog.Crops, catalog.SeedCrops, new Dictionary<uint, Stock>(), new Dictionary<uint, int>(), false);
+    Check(actualView.Length == catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct().Count()
+        && actualView.All(r => r.Seed > 0 && game.GetExcelSheet<Lumina.Excel.Sheets.Item>()!.GetRow(r.Seed).Icon > 0),
+        "Every Korean garden and seed row must carry a real seed icon ID: " + string.Join(",", actualView.Where(r => r.Seed == 0).Select(r => r.Item)));
     var real = SeedPlanner.Build(7755, 1, new Dictionary<uint, Stock> {
         [7744] = new(0, 0, true), [7742] = new(0, 0, true) }, catalog.Crosses);
     Check(real.Error == "" && real.Stages.Last().Output == 7755 && real.Stages.Any(s => s.Output == 7748), "Jute must recursively obtain star anise from root seeds.");
