@@ -1,0 +1,14 @@
+{
+  "Author": "ffxiv-tc-port; local KR compatibility",
+  "Name": "TC Gardening KR",
+  "InternalName": "TCToolbox",
+  "AssemblyVersion": "7.25.0.45",
+  "Description": "한국 서버용 기존 TCToolbox 재배 모듈. 화단·화분 심기, 관리, 비료, 수확 및 개별 칸 IPC를 제공합니다.",
+  "Punchline": "화단·화분 재배 도구",
+  "DalamudApiLevel": 15,
+  "ApplicableVersion": "any",
+  "CanUnloadAsync": false,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "LoadPriority": 0
+}

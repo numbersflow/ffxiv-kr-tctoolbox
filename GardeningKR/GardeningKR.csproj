@@ -1,0 +1,36 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <AssemblyName>TCToolbox</AssemblyName>
+    <Version>7.25.0.45</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Plugin.cs" />
+    <Compile Include="ControlState.cs" />
+    <Compile Include="../TCToolbox/Svc.cs" />
+    <Compile Include="../TCToolbox/Modules/AutoGardensWork*.cs" />
+    <Compile Include="../TCToolbox/Configs/AutoGardensWorkConfig.cs" />
+    <Compile Include="../TCToolbox/Configs/FleetEmergencyStopConfig.cs" />
+    <Compile Include="../TCToolbox/Configs/HotkeyConfig.cs" />
+    <Compile Include="../TCToolbox/Core/Garden*.cs" />
+    <Compile Include="../TCToolbox/Core/TcModule.cs" />
+    <Compile Include="../TCToolbox/Core/ModuleCategory.cs" />
+    <Compile Include="../TCToolbox/Core/ModuleFailureNotice.cs" />
+    <Compile Include="../TCToolbox/Core/TaskQueue.cs" />
+    <Compile Include="../TCToolbox/Core/Throttle.cs" />
+    <Compile Include="../TCToolbox/Core/UiHelper.cs" />
+    <Compile Include="../TCToolbox/Core/AddonPressGuard.cs" />
+    <Compile Include="../TCToolbox/Core/AddonPrompt.cs" />
+    <Compile Include="../TCToolbox/Core/PluginPresence.cs" />
+    <Compile Include="../TCToolbox/Core/ItemNames.cs" />
+    <Compile Include="../TCToolbox/Core/IpcFrameworkGate.cs" />
+    <Compile Include="../TCToolbox/Core/ContextMenuLayout*.cs" />
+    <Compile Include="../TCToolbox/Core/ExternalNav.cs" />
+    <Compile Include="../TCToolbox/Core/NavStop.cs" />
+    <Compile Include="../TCToolbox/Core/AutomationGate.cs" />
+    <Compile Include="../TCToolbox/Core/TextAdvanceLock.cs" />
+    <Compile Include="../TCToolbox/Core/YesAlready*.cs" />
+  </ItemGroup>
+</Project>

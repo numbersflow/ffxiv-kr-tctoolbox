@@ -15,7 +15,7 @@ using Lumina.Excel;
 using Lumina.Excel.Sheets;
 using TCToolbox.Core;
 using GameObject = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
-using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
+using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType;
 
 namespace TCToolbox.Modules;
 
@@ -249,7 +249,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
     }
 
     /// <summary>換區後地壟 ObjectId 會重來，掃描結果一律作廢，避免拿到別座庭院的舊狀態。</summary>
-    private void OnTerritoryChanged(ushort territoryType) => scannedActions.Clear();
+    private void OnTerritoryChanged(uint territoryType) => scannedActions.Clear();
 
     private void OnUpdate(IFramework framework)
     {
@@ -281,10 +281,10 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         try
         {
             var sheet = Svc.Data.GetExcelSheet<RawRow>(null, GardeningTextSheet);
+            var rows = GardenTextData.Read(id => sheet.GetRowOrDefault(id)?.ReadStringColumn(1).ExtractText());
             string Read(uint rowId, string fallback)
             {
-                var text = sheet.GetRowOrDefault(rowId)?.ReadStringColumn(1).ExtractText();
-                return string.IsNullOrWhiteSpace(text) ? fallback : text;
+                return rows[rowId];
             }
 
             textCancel = Read(1, textCancel);
@@ -304,7 +304,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         }
         catch (Exception ex)
         {
-            Svc.Log.Warning(ex, $"[{InternalName}] 讀取園圃選單文字表失敗，使用台服 7.20 預設值");
+            throw new InvalidOperationException("재배 메뉴 데이터를 읽지 못해 재배 모듈을 활성화하지 않았습니다.", ex);
         }
     }
 
@@ -778,7 +778,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
 
         // 花盆可能以 EventObj 或 Housing 兩種 ObjectKind 出現（未能離線確認實際值），
         // 兩者都接受；真正的把關是名稱必須在園藝花盆集合內。
-        if (obj.ObjectKind is ObjectKind.EventObj or ObjectKind.Housing &&
+        if (obj.ObjectKind is ObjectKind.EventObj or ObjectKind.HousingEventObject &&
             GetPotNames().Contains(obj.Name.TextValue))
         {
             kind = PatchKind.Pot;
