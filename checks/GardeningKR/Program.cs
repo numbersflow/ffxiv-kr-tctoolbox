@@ -36,6 +36,22 @@ foreach (var missing in new[] { 0u, 2u, 6u, 10u })
 try { GardenTextData.Read(id => id == 4 ? " " : korean[id]); throw new InvalidDataException("Blank menu accepted."); }
 catch (InvalidOperationException) { passed++; }
 var fresh = new Configuration();
+bool ReadPlanningResult(Func<bool, TimeSpan> interval)
+{
+    var cache = new GardenBookCache();
+    long now = 0, completedAt = -1;
+    for (var attempt = 0; attempt < 8; attempt++) {
+        if (completedAt < 0 || now >= completedAt + 1000) completedAt = now + 500;
+        cache.Update(now < completedAt ? "{\"Available\":false,\"Pending\":true}"
+            : "{\"Available\":true,\"Pending\":false,\"Character\":10,\"Expansion\":6,\"Error\":\"\",\"Rows\":[{\"ItemId\":17548,\"Needed\":8}]}", 10);
+        if (cache.Ready) return cache.Needs.GetValueOrDefault(17548u) == 8;
+        now += (long)interval(cache.Updating).TotalMilliseconds;
+    }
+    return false;
+}
+Check(!ReadPlanningResult(_ => TimeSpan.FromSeconds(5)) && ReadPlanningResult(HarvestService.RefreshInterval),
+    "The old five-second polling repeatedly starts a new count refresh; pending retries must consume the completed plan and restore readiness.");
+Check(HarvestService.RefreshInterval(false) == TimeSpan.FromSeconds(5), "Completed planning retains the normal bounded refresh interval.");
 var origin = new System.Numerics.Vector3(54.96415f, 25.99997f, -67.922775f);
 var offsets = new[] { (-1f,-1f), (0f,-1f), (1f,-1f), (1f,0f), (1f,1f), (0f,1f), (-1f,1f), (-1f,0f) };
 var observedPatches = offsets.Select((v,i) => new GardenPatch((ulong)(100+i), "plot", 4294639623u,

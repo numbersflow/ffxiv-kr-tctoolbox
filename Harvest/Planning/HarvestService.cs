@@ -35,6 +35,8 @@ internal sealed partial class HarvestService : IDisposable
     private Dictionary<uint, int> supplies = [];
     private string snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"준비 중\"}";
     private string error = "";
+    private string lastReadiness = "";
+    internal static TimeSpan RefreshInterval(bool pending) => TimeSpan.FromMilliseconds(pending ? 250 : 5000);
     private DateTime nextRefresh;
     private ulong owner;
     private Visit? visit;
@@ -91,7 +93,7 @@ internal sealed partial class HarvestService : IDisposable
     private void Refresh(IFramework framework)
     {
         if (DateTime.UtcNow < nextRefresh) return;
-        nextRefresh = DateTime.UtcNow.AddSeconds(5);
+        nextRefresh = DateTime.UtcNow + RefreshInterval(false);
         if (visit != null) {
             if (Svc.PlayerState.ContentId == owner) PublishGardenView();
             return;
@@ -113,6 +115,8 @@ internal sealed partial class HarvestService : IDisposable
             using var response = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<string, string>("GatherBuddyReborn.GetHarvestStock")
                 .InvokeFunc(JsonSerializer.Serialize(ids)));
             var root = response.RootElement;
+            if (!root.GetProperty("Available").GetBoolean() && root.TryGetProperty("Pending", out var pending) && pending.GetBoolean())
+                nextRefresh = DateTime.UtcNow + RefreshInterval(true);
             if (!root.GetProperty("Available").GetBoolean() || root.GetProperty("Character").GetUInt64() != owner
                 || !root.GetProperty("RetainerKnown").GetBoolean()) throw new InvalidOperationException("가방·집사 재고 확인 대기");
             stock = root.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(),
@@ -133,13 +137,21 @@ internal sealed partial class HarvestService : IDisposable
                 Goals = Profile.Goals, BookItems = Profile.BookItems, Growable = catalog.Crops.Keys,
                 Searchable = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         } catch (Exception ex) {
+            if (ex is GardenBookPendingException) nextRefresh = DateTime.UtcNow + RefreshInterval(true);
             error = ex is GardenBookPendingException ? "" : ex.Message;
             var care = catalog != null && Profile.Batch != null && HasCareDue()
                 && (Profile.Goals.Any(g => g.Enabled && !g.Complete && g.Quantity > 0) || Profile.BookItems.Count > 0);
             snapshot = JsonSerializer.Serialize(new { Available = care, Character = owner, Ready = care,
+                Detail = ex is GardenBookPendingException ? "제작수첩 재료 갱신 완료 확인 중" : error,
                 CareOnly = care, Supply = (object?)null, Error = error, Growable = catalog?.Crops.Keys,
                 Searchable = catalog?.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
-        } finally { PublishGardenView(); }
+        } finally {
+            PublishGardenView();
+            using var state = JsonDocument.Parse(snapshot);
+            var r = state.RootElement;
+            var readiness = $"available={r.GetProperty("Available")}, ready={r.GetProperty("Ready")}, bookReady={bookReady}, bookUpdating={bookCache.Updating}, bookSnapshot={bookCache.HasSnapshot}, stockKnown={stockKnown}, error={error}, batch={Profile.Batch?.Output}, supplies={string.Join(',', supplies.Select(p => $"{p.Key}:{p.Value}"))}";
+            if (readiness != lastReadiness) { lastReadiness = readiness; Svc.Log.Information("Garden readiness: " + readiness); }
+        }
     }
 
     private void RefreshGardenBooks()
