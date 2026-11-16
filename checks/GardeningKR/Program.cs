@@ -105,6 +105,12 @@ var scopedView = GardenView.Items(viewProfile, viewCrops, viewSeeds, viewStock, 
 Check(scopedView.Single(r => r.Item == 100) is { Needed: 3, Quantity: 9, BookSelected: true } && viewBooks[100] == 8,
     "Expansion views change displayed demand without changing all-expansion demand or selections.");
 var straight = Enumerable.Range(0, 101).Select(i => new Vector3(i / 10f, 0, 0)).ToArray();
+Check(GardenRecordingPolicy.Blocker(GardenRecordingMotion.Ground) == null
+    && GardenRecordingPolicy.Blocker(GardenRecordingMotion.Mounted) == null, "Passive coordinate capture must allow both walking and ground-mounted movement.");
+Check(GardenRecordingPolicy.Blocker(GardenRecordingMotion.Mounted | GardenRecordingMotion.Flying) != null,
+    "Ground mounting is distinct from an unreplayable flight path.");
+Check(GardenRecordingPolicy.Blocker(GardenRecordingMotion.Diving) != null,
+    "A diving path cannot silently become a ground route.");
 Check(CornerRoute.Simplify(straight).Count == 2, "Straight walks store only start and destination.");
 Vector3[] turn = [new(0,0,0), new(1,0,0), new(2,0,0), new(2,0,1), new(2,0,2)];
 var corners = CornerRoute.Simplify(turn);

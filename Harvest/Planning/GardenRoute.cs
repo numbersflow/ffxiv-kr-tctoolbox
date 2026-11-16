@@ -5,6 +5,18 @@ using System.Numerics;
 
 namespace Harvest.Planning;
 
+[Flags]
+public enum GardenRecordingMotion { Ground = 0, Mounted = 1, Flying = 2, Diving = 4, Jumping = 8 }
+
+public static class GardenRecordingPolicy
+{
+    public static string? Blocker(GardenRecordingMotion motion) =>
+        (motion & GardenRecordingMotion.Flying) != 0 ? "비행 중에는 지상 도보 경로를 기록할 수 없습니다."
+        : (motion & GardenRecordingMotion.Diving) != 0 ? "잠수 중에는 지상 도보 경로를 기록할 수 없습니다."
+        : (motion & GardenRecordingMotion.Jumping) != 0 ? "점프 중에는 지상 이동 경로를 기록할 수 없습니다."
+        : null;
+}
+
 public sealed record GardenRoutePoint(float X, float Y, float Z)
 {
     [Newtonsoft.Json.JsonIgnore, System.Text.Json.Serialization.JsonIgnore]
