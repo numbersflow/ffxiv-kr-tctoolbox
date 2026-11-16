@@ -69,6 +69,16 @@ var batch = new GardenBatch { Cross = true, SeedA = 1, SeedB = 1, Cells = [a.Id,
 Check(!GardenPolicy.IsAnchor(batch, a) && GardenPolicy.IsAnchor(batch, b), "Same-seed crosses must preserve only the anchor cell.");
 batch.Clearing = true;
 Check(!GardenPolicy.IsAnchor(batch, b), "A finished stage releases the anchor for harvest.");
+var profile = new HarvestProfile { Goals = [new() { Item = 7770, Quantity = 3 }], Cells = [a, b], Batch = batch };
+a.Owned = true; a.Pending = "Harvest";
+profile.SelectCell(a.Id, false);
+Check(!a.Enabled && b.Enabled && a.Owned && a.Pending == "Harvest", "Deselecting a cell preserves its crop and uncertain operation, and does not deselect another cell.");
+profile.SelectCell(a.Id, true);
+Check(a.Enabled && profile.Goals.Single().Quantity == 3 && profile.Batch == batch, "Reselecting a cell preserves quantity and the active plan.");
+try { profile.SelectCell("other-character-cell", false); throw new InvalidDataException("Unknown cell accepted."); }
+catch (ArgumentException) { passed++; }
+var selectedProfile = JsonConvert.DeserializeObject<HarvestProfile>(JsonConvert.SerializeObject(profile))!;
+Check(selectedProfile.Cells.All(c => c.Enabled) && selectedProfile.Cells[0].Pending == "Harvest", "Cell choices and pending actions survive reload together.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 1)]) == 0, "Existing stack capacity can absorb an output.");
 Check(GardenPolicy.RequiredSlots([(1u, 99, 99, 0), (2u, 5, 99, 0)]) == 2, "Crop and crossbred seed use separate capacity.");
 Check(GardenPolicy.RequiredSlots([(1u, 1, 99, 0), (1u, 1, 99, 0)]) == 1, "Identical outputs share a stack.");

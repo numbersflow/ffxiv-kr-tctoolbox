@@ -19,6 +19,7 @@ internal sealed partial class HarvestService : IDisposable
     private readonly ICallGateProvider<string> snapshotGate;
     private readonly ICallGateProvider<string, string> configGate;
     private readonly ICallGateProvider<string> protectionGate;
+    private readonly ICallGateProvider<object> gardenUiGate;
     private Dictionary<uint, Stock> stock = [];
     private Dictionary<uint, int> books = [];
     private Dictionary<uint, int> supplies = [];
@@ -29,6 +30,7 @@ internal sealed partial class HarvestService : IDisposable
     private Visit? visit;
     private HarvestProfile? displayProfile;
     private readonly Queue<string> pendingConfiguration = [];
+    private bool disposed;
     public bool Active => visit != null;
     private HarvestProfile Profile => config.Profiles.GetValueOrDefault(owner)
         ?? (config.Profiles[owner] = new());
@@ -39,6 +41,9 @@ internal sealed partial class HarvestService : IDisposable
     public HarvestService(Configuration config, AutoGardensWork garden)
     {
         this.config = config; this.garden = garden;
+        // Workflow invokes this only from its ImGui draw callback, using the same cached view.
+        gardenUiGate = Svc.PluginInterface.GetIpcProvider<object>("Harvest.DrawGardenUiV1");
+        gardenUiGate.RegisterAction(Draw);
         snapshotGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetWorkflowSnapshot");
         snapshotGate.RegisterFunc(() => snapshot);
         configGate = Svc.PluginInterface.GetIpcProvider<string, string>("Harvest.Configure");
@@ -171,7 +176,7 @@ internal sealed partial class HarvestService : IDisposable
     private void ReserveBatch(GardenBatch batch)
     {
         if (batch.Clearing) return;
-        var cells = Profile.Cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
+        var cells = Profile.Cells.Where(c => batch.Cells.Contains(c.Id) && c.Enabled).ToArray();
         foreach (var group in cells.Where(c => !c.Owned).GroupBy(c => c.Seed)) supplies[group.Key] = group.Count();
         var soil = cells.Count(c => !c.Owned);
         if (soil > 0) supplies[Profile.Soil] = soil;
@@ -200,8 +205,10 @@ internal sealed partial class HarvestService : IDisposable
 
     public void Dispose()
     {
+        disposed = true;
         Svc.Framework.Update -= Refresh;
         endpoint.Dispose();
         snapshotGate.UnregisterFunc(); configGate.UnregisterFunc(); protectionGate.UnregisterFunc();
+        gardenUiGate.UnregisterAction();
     }
 }

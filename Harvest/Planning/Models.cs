@@ -69,6 +69,11 @@ public sealed class HarvestProfile
     public GardenBatch? Batch { get; set; }
     public uint Soil { get; set; } = 7766;
     public DateTime RetryAt { get; set; }
+    public void SelectCell(string id, bool selected)
+    {
+        var cell = Cells.Find(c => c.Id == id) ?? throw new ArgumentException("등록된 화단 칸이 아닙니다.");
+        cell.Enabled = selected;
+    }
 }
 
 public sealed record Crop(uint Item, uint Seed, string Name, bool Flower, double Hours, uint[] Colors);
