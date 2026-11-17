@@ -23,12 +23,26 @@ Check(Svc.PluginInterface.HomeRequests==1,"Remaining cells in one visit must not
 service=new(route); Svc.Objects.LocalPlayer.Position=new(20,0,20);
 Check(service.Run(cell) && Svc.PluginInterface.Travel=="home","An off-route start uses the configured Lifestream arrival command.");
 service.TeleportFinished();
+Check(service.Run(cell),"An unsettled post-teleport position must wait instead of immediately failing the first cell.");
+var arrivalsBefore=Svc.PluginInterface.HomeRequests;
+Check(service.Run(cell) && Svc.PluginInterface.HomeRequests==arrivalsBefore,"Arrival verification must not start another teleport.");
+service.ArrivalTimedOut();
 try { service.Run(cell); throw new Exception("An invalid teleport destination must not start a cross-zone walk."); }
 catch(InvalidOperationException) {checks++;}
+var rejectedRequests=Svc.PluginInterface.HomeRequests;
+try { service.Run(cell); throw new Exception("A failed arrival must not restart the same visit's teleport."); }
+catch(InvalidOperationException) {Check(Svc.PluginInterface.HomeRequests==rejectedRequests,"A failed facility is not teleported to repeatedly during one visit");}
+
 service=new(route); Svc.Objects.LocalPlayer.Position=new(2,1,2); Svc.PluginInterface.Travel="";
 Check(service.Run(cell) && Svc.PluginInterface.Travel=="home","A new visit must teleport even when already standing beside the garden.");
 service=new(route);Svc.PluginInterface.HouseOverride=1;Svc.PluginInterface.TravelMode=null;
 Check(service.Run(cell) && Svc.PluginInterface.TravelMode==0,"A walk-to-door override must also be bypassed because the saved path starts at the teleport spawn.");
 service=new(route);service.RemoveRoute();Svc.PluginInterface.HouseOverride=2;
 Check(service.Run(cell) && Svc.PluginInterface.TravelMode==2,"Visits without a recorded outdoor walk retain the existing home-entry command for indoor pots.");
+service=new(route);Svc.Objects.LocalPlayer.Position=new(20,0,20);
+service.Run(cell);service.TeleportFinished();
+Check(service.Run(cell),"A delayed arrival keeps the same cell pending");
+var recoverRequests=Svc.PluginInterface.HomeRequests;var recoverMoves=Svc.PluginInterface.Moves;
+Svc.Objects.LocalPlayer.Position=Vector3.Zero;
+Check(service.Run(cell) && Svc.PluginInterface.HomeRequests==recoverRequests && Svc.PluginInterface.Moves==recoverMoves+1,"Once arrival information settles, the same visit starts the saved walk without another teleport or skipped cell");
 Console.WriteLine($"PASS {checks} actual garden walk visit checks; no native game actions executed.");

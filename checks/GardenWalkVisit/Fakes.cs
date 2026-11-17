@@ -18,7 +18,7 @@ namespace Harvest.Core {
 namespace Harvest.Planning {
  internal static class Svc { internal static Core.FakeObjects Objects=new(); internal static Core.FakeIpc PluginInterface=new(); }
  internal sealed partial class HarvestService {
-  private sealed class Visit {public HashSet<string> WalkedRoutes=[],HomeArrivals=[];public bool Travel,RouteWalking;public DateTime StepAt,TravelAt;}
+  private sealed class Visit {public HashSet<string> WalkedRoutes=[],HomeArrivals=[],FailedRoutes=[];public bool Travel,RouteWalking;public DateTime StepAt,TravelAt,ArrivalCheckAt;}
   private readonly Visit work=new();
   private readonly HarvestProfile Profile=new();
   internal HarvestService(GardenWalkRoute route){Profile.WalkRoutes[route.Group]=route;}
@@ -27,6 +27,7 @@ namespace Harvest.Planning {
   internal bool Run(GardenCell cell)=>WalkingRouteInProgress(work,cell,out _);
   internal void TeleportFinished()=>work.TravelAt=DateTime.UtcNow.AddSeconds(-2);
   internal void RemoveRoute()=>Profile.WalkRoutes.Clear();
+  internal void ArrivalTimedOut()=>work.ArrivalCheckAt=DateTime.UtcNow.AddSeconds(-11);
   internal bool Finished=>work.WalkedRoutes.Contains("밭");
  }
 }

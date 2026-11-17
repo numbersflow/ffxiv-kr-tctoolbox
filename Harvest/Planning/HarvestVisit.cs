@@ -22,8 +22,9 @@ internal sealed partial class HarvestService
         public bool RouteWalking;
         public HashSet<string> WalkedRoutes = [];
         public HashSet<string> HomeArrivals = [];
+        public HashSet<string> FailedRoutes = [];
         public int ReservedSlots = 8;
-        public DateTime Started = DateTime.UtcNow, StepAt = DateTime.UtcNow, ScanAt, TravelAt;
+        public DateTime Started = DateTime.UtcNow, StepAt = DateTime.UtcNow, ScanAt, TravelAt, ArrivalCheckAt;
         public DateTime PauseAt;
         public string Phase = "준비";
         public HashSet<string> Done = [];
@@ -241,7 +242,7 @@ internal sealed partial class HarvestService
     }
     private void StopOwnedTravel(Visit work, bool resetRoutes = true)
     {
-        if (resetRoutes) { work.HomeArrivals.Clear(); work.WalkedRoutes.Clear(); }
+        if (resetRoutes) { work.HomeArrivals.Clear(); work.WalkedRoutes.Clear(); work.FailedRoutes.Clear(); }
         if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
         if (work.Travel || work.RouteWalking) {
             var gate = Svc.PluginInterface.GetIpcSubscriber<object>("Lifestream.Abort");

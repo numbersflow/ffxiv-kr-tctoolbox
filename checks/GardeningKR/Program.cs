@@ -103,12 +103,13 @@ Check(autoProfile.RegisterPatches(recreatedCells,()=>{})==0 && autoProfile.Cells
     var work=Activator.CreateInstance(visitType,true)!;
     var arrivals=(HashSet<string>)visitType.GetField("HomeArrivals")!.GetValue(work)!;
     var walked=(HashSet<string>)visitType.GetField("WalkedRoutes")!.GetValue(work)!;
-    arrivals.Add("bed");walked.Add("bed");
+    var failed=(HashSet<string>)visitType.GetField("FailedRoutes")!.GetValue(work)!;
+    arrivals.Add("bed");walked.Add("bed");failed.Add("bed");
     var stop=typeof(HarvestService).GetMethod("StopOwnedTravel",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
     stop.Invoke(service,new object[]{work,false});
-    Check(arrivals.Contains("bed") && walked.Contains("bed"),"A cell failure must preserve completed travel and cannot trigger a fresh teleport for the next slot");
+    Check(arrivals.Contains("bed") && walked.Contains("bed") && failed.Contains("bed"),"A cell failure must preserve completed travel and cannot trigger a fresh teleport for the next slot");
     stop.Invoke(service,new object[]{work,true});
-    Check(arrivals.Count==0 && walked.Count==0,"Cancellation and pause invalidate the route so the next visit starts with a fresh home teleport");
+    Check(arrivals.Count==0 && walked.Count==0 && failed.Count==0,"Cancellation and pause invalidate the route so the next visit starts with a fresh home teleport");
 }
 var rollbackProfile = new HarvestProfile();
 try { rollbackProfile.RegisterPatches(autoCells,()=>throw new IOException("save failed")); throw new Exception("Failed bulk save accepted."); }

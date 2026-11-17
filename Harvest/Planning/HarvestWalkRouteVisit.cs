@@ -21,8 +21,18 @@ internal sealed partial class HarvestService
                 work.Travel = true; work.TravelAt = DateTime.UtcNow;
                 return true;
             }
-            if (busy.InvokeFunc() || DateTime.UtcNow - work.TravelAt < TimeSpan.FromSeconds(1)) return true;
-            work.Travel = false; work.HomeArrivals.Add(cell.Group);
+            if (busy.InvokeFunc() || DateTime.UtcNow - work.TravelAt < TimeSpan.FromSeconds(1)) {
+                work.ArrivalCheckAt = DateTime.MinValue;
+                return true;
+            }
+            if (Profile.WalkRoutes.TryGetValue(cell.Group, out var arrivalRoute)
+                && (Svc.Objects.LocalPlayer is not { } arrivedPlayer || !arrivalRoute.CanJoin(CurrentRouteLocation(), arrivedPlayer.Position))) {
+                phase = "주택 도착 정보 확인";
+                if (work.ArrivalCheckAt == DateTime.MinValue) work.ArrivalCheckAt = DateTime.UtcNow;
+                if (DateTime.UtcNow - work.ArrivalCheckAt < TimeSpan.FromSeconds(10)) return true;
+                throw new InvalidOperationException("개인주택 도착 정보를 기다렸지만 저장한 도보 경로와 일치하지 않습니다.");
+            }
+            work.Travel = false; work.ArrivalCheckAt = DateTime.MinValue; work.HomeArrivals.Add(cell.Group);
         }
         phase = "저장한 도보 경로 이동";
         if (!Profile.WalkRoutes.TryGetValue(cell.Group, out var route)) return false;
