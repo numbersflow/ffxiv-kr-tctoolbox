@@ -72,6 +72,8 @@ public sealed unsafe partial class AutoGardensWork : TcModule
     /// <summary>搜尋半徑（碼）：室外庭院與室內房間都用同一個值。</summary>
     private const float SearchRange = 30f;
 
+    private string[] potTexts = [];
+    private const string PotTextSheet = "custom/003/HouFurPlantPot_00331";
     private const string GardeningTextSheet = "custom/001/CmnDefHousingGardeningPlant_00151";
 
     /// <summary>園圃動作；<see cref="Scan"/> 只互動讀取可用選項後取消，不改變任何狀態。</summary>
@@ -305,6 +307,8 @@ public sealed unsafe partial class AutoGardensWork : TcModule
             textStatusVigorous = Read(8, textStatusVigorous);
             textStatusDepressed = Read(9, textStatusDepressed);
             textStatusRipe = Read(10, textStatusRipe);
+            var pots = Svc.Data.GetExcelSheet<RawRow>(null, PotTextSheet);
+            potTexts = GardenTextData.Read(id => pots.GetRowOrDefault(id)?.ReadStringColumn(1).ExtractText(), 19);
         }
         catch (Exception ex)
         {
@@ -312,13 +316,13 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         }
     }
 
-    private string ActionText(GardenAction action) => action switch
+    private string ActionText(GardenAction action, bool pot = false) => action switch
     {
         GardenAction.Harvest => textHarvest,
         GardenAction.Tend => textTend,
         GardenAction.Fertilize => textFertilize,
-        GardenAction.Plant => textPlant,
-        GardenAction.Dispose => textDispose,
+        GardenAction.Plant => pot ? potTexts[2] : textPlant,
+        GardenAction.Dispose => pot ? potTexts[5] : textDispose,
         _ => textCancel,
     };
 
@@ -540,7 +544,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
                 return true;
             }
 
-            var target = ActionText(job.Chosen);
+            var target = ActionText(job.Chosen, GetPatchKind(job.GameObjectId) == "pot");
             var index = entries.FindIndex(x => x.Contains(target, StringComparison.Ordinal));
             if (index < 0)
             {
@@ -1052,7 +1056,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
     {
         if (!scannedActions.TryGetValue(gameObjectId, out var actions)) return "unscanned";
         if (actions.Any(x => x.Contains(textHarvest, StringComparison.Ordinal))) return "mature";
-        if (actions.Any(x => x.Contains(textPlant, StringComparison.Ordinal))) return "empty";
+        if (actions.Any(x => x.Contains(textPlant, StringComparison.Ordinal) || potTexts.Length > 2 && x.Contains(potTexts[2], StringComparison.Ordinal))) return "empty";
         if (actions.Any(x => x.Contains(textTend, StringComparison.Ordinal) ||
                              x.Contains(textFertilize, StringComparison.Ordinal))) return "growing";
         return "unknown";

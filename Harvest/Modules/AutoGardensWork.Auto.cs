@@ -201,10 +201,11 @@ public sealed unsafe partial class AutoGardensWork
     {
         cropName = string.Empty;
 
-        if (text.Contains(textPlotEmpty, StringComparison.Ordinal))
+        if (text.Contains(textPlotEmpty, StringComparison.Ordinal) || potTexts.Length > 0 && text.Contains(potTexts[0], StringComparison.Ordinal))
             return PatchState.Empty;
 
         if (TrySplit(text, textStatusDead, out cropName)) return PatchState.Withered;
+        if (potTexts.Length > 18 && TrySplit(text, potTexts[18], out cropName)) return PatchState.Ripe;
         if (TrySplit(text, textStatusRipe, out cropName)) return PatchState.Ripe;
         if (TrySplit(text, textStatusDepressed, out cropName)) return PatchState.NeedsCare;
         if (TrySplit(text, textStatusVigorous, out cropName)) return PatchState.Growing;
@@ -278,7 +279,7 @@ public sealed unsafe partial class AutoGardensWork
 
         // 🔴 兩個來源要互相同意：Talk 說可以做的事，選單上必須真的有那個選項。
         //    對不起來就不動——那代表我對這一格的判讀是錯的，而不是遊戲少給了一個選項。
-        var optionText = ActionText(chosen);
+        var optionText = ActionText(chosen, GetPatchKind(job.GameObjectId) == "pot");
         if (!entries.Any(x => x.Contains(optionText, StringComparison.Ordinal)))
         {
             job.Reason = $"{decision.Reason}；但選單上沒有「{optionText}」，判讀可能有誤，本次不動";

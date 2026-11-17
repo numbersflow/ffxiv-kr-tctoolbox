@@ -4,9 +4,9 @@ namespace Harvest.Core;
 
 internal static class GardenTextData
 {
-    internal static string[] Read(Func<uint, string?> read)
+    internal static string[] Read(Func<uint, string?> read, int count = 11)
     {
-        var rows = new string[11];
+        var rows = new string[count];
         for (uint id = 0; id < rows.Length; id++)
         {
             rows[id] = read(id) ?? string.Empty;

@@ -381,6 +381,28 @@ Check(CropNameMatching.Resolve("알 수 없는 꽃이", new Dictionary<string, u
 using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV - KOREA\game\sqpack",
     new Lumina.LuminaOptions { PanicOnSheetChecksumMismatch = false, DefaultExcelLanguage = (Lumina.Data.Language)7 })) {
     var catalog = new Catalog(game.GetExcelSheet<Lumina.Excel.Sheets.Item>(), game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>());
+    var potSheet=game.GetExcelSheet<Lumina.Excel.RawRow>(null,"custom/003/HouFurPlantPot_00331")!;
+    var plotSheet=game.GetExcelSheet<Lumina.Excel.RawRow>(null,"custom/001/CmnDefHousingGardeningPlant_00151")!;
+    var potRows=GardenTextData.Read(id=>potSheet.GetRow(id).ReadStringColumn(1).ExtractText(),19);
+    var plotRows=GardenTextData.Read(id=>plotSheet.GetRow(id).ReadStringColumn(1).ExtractText());
+    var nativeModule=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Harvest.Modules.AutoGardensWork));
+    const System.Reflection.BindingFlags nativeFlags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+    void SetNative(string name,object value)=>nativeModule.GetType().GetField(name,nativeFlags)!.SetValue(nativeModule,value);
+    SetNative("potTexts",potRows);
+    foreach(var entry in new[]{("textPlotEmpty",0),("textCancel",1),("textPlant",2),("textFertilize",3),("textTend",4),("textDispose",5),("textHarvest",6),
+        ("textStatusDead",7),("textStatusVigorous",8),("textStatusDepressed",9),("textStatusRipe",10)})SetNative(entry.Item1,plotRows[entry.Item2]);
+    PatchState NativeState(string text)=>(PatchState)nativeModule.GetType().GetMethod("ClassifyTalk",nativeFlags)!.Invoke(nativeModule,[text,""])!;
+    Check(NativeState(potRows[0])==PatchState.Empty && NativeState(plotRows[0])==PatchState.Empty,
+        "Actual talk parser recognizes both installed KR empty-pot and empty-bed messages");
+    Check(NativeState(catalog.Crops[14071].Name+potRows[18])==PatchState.Ripe,
+        "Actual talk parser treats a fully bloomed indoor flower as harvestable");
+    Check(NativeState(catalog.Crops[14071].Name+potRows[14])==PatchState.Growing && NativeState(catalog.Crops[14071].Name+potRows[15])==PatchState.NeedsCare,
+        "Installed indoor growth and care messages retain their correct states");
+    var actionText=nativeModule.GetType().GetMethod("ActionText",nativeFlags)!;
+    Check((string)actionText.Invoke(nativeModule,[Harvest.Modules.AutoGardensWork.GardenAction.Plant,true])! == potRows[2]
+        && (string)actionText.Invoke(nativeModule,[Harvest.Modules.AutoGardensWork.GardenAction.Plant,false])! == plotRows[2]
+        && (string)actionText.Invoke(nativeModule,[Harvest.Modules.AutoGardensWork.GardenAction.Dispose,true])! == potRows[5],
+        "Native action selection uses the installed pot-specific planting and disposal menu entries");
     var observedStock = new Dictionary<uint,Stock>();
     (Dictionary<uint,int> Supplies, string Error) Prepare(HarvestProfile p, params uint[] roots)
     {
