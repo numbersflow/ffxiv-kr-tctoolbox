@@ -84,7 +84,10 @@ internal sealed partial class HarvestService
             }
             work.Travel = false;
             if (work.Object == 0) {
-                var candidates = NearbyPatches().Where(p => GardenRegistration.Matches(cell, p)).ToArray();
+                var patches = NearbyPatches();
+                var candidates = patches.Where(p => GardenRegistration.Matches(cell, p)).ToArray();
+                if (candidates.Length != 1 || candidates[0].InstanceKey != cell.LayoutInstanceKey)
+                    Svc.Log.Information($"Garden patch identity: expected={cell.LayoutInstanceKey}:{cell.LayoutSubId} at {cell.Position}, matches={candidates.Length}, nearby={string.Join(';', patches.Select(p => $"{p.InstanceKey}:{p.SubId}@{p.Origin}"))}");
                 if (candidates.Length != 1) throw new InvalidOperationException("등록 시설의 칸을 유일하게 식별할 수 없습니다.");
                 work.Object = candidates[0].Object;
             }
@@ -137,7 +140,7 @@ internal sealed partial class HarvestService
             return Busy(work, action.ToString()!);
         } catch (Exception ex) {
             error = ex.Message;
-            StopOwnedTravel(work);
+            StopOwnedTravel(work, resetRoutes: false);
             work.Failed++;
             if (work.Cell is { } cell) { cell.Error = ex.Message; cell.RetryAt = DateTime.UtcNow.AddMinutes(1); }
             FinishCell(work); config.Save();
@@ -236,9 +239,9 @@ internal sealed partial class HarvestService
         return housing != null && Svc.ClientState.TerritoryType == cell.Territory && Svc.Objects.LocalPlayer?.CurrentWorld.RowId == cell.World
             && (housing->GetCurrentHouseId().Id == cell.House || housing->GetCurrentIndoorHouseId().Id == cell.House);
     }
-    private void StopOwnedTravel(Visit work)
+    private void StopOwnedTravel(Visit work, bool resetRoutes = true)
     {
-        work.HomeArrivals.Clear(); work.WalkedRoutes.Clear();
+        if (resetRoutes) { work.HomeArrivals.Clear(); work.WalkedRoutes.Clear(); }
         if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
         if (work.Travel || work.RouteWalking) {
             var gate = Svc.PluginInterface.GetIpcSubscriber<object>("Lifestream.Abort");

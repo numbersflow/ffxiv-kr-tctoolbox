@@ -87,11 +87,29 @@ var autoCells = orderedPatches.Select((p,i) => new GardenCell { Group="밭", Ind
     X=origin.X, Y=origin.Y, Z=origin.Z, LayoutInstanceKey=p.InstanceKey, LayoutSubId=p.SubId }).ToArray();
 Check(autoCells.All(c=>observedPatches.Count(p=>GardenRegistration.Matches(c,p))==1), "Actual visit matching uniquely resolves each slot despite identical object positions.");
 Check(autoCells.All(c=>observedPatches.Select(p=>p with { Object=p.Object+1000 }).Count(p=>GardenRegistration.Matches(c,p))==1), "Recreated object IDs must not invalidate saved layout identity.");
+Check(autoCells.All(c=>observedPatches.Select(p=>p with {Object=p.Object+1000,InstanceKey=p.InstanceKey+1}).Count(p=>GardenRegistration.Matches(c,p))==1), "Zone re-entry can recreate layout instance keys without changing the registered facility and slot.");
+Check(!GardenRegistration.Matches(autoCells[0],observedPatches[0] with {Origin=origin+new Vector3(4,0,0)}),"A matching sub-ID in another bed must not match the registered bed.");
+
 var autoProfile = new HarvestProfile { Cells=[new() { Group="밭", World=1, Territory=2, House=3, X=origin.X, Y=origin.Y, Z=origin.Z }] };
 autoProfile.Batch = new() { Cells=[autoProfile.Cells[0].Id] };
 Check(autoProfile.RegisterPatches(autoCells,()=>{}) == 8 && autoProfile.Cells.Count==8 && autoProfile.Batch==null, "Automatic registration replaces the unused ambiguous legacy record and clears only its unstarted batch.");
 autoProfile.Cells[0].Owned=true; autoProfile.Cells[0].Seed=123; autoProfile.Cells[0].Enabled=false;
 Check(autoProfile.RegisterPatches(autoCells,()=>{})==0 && autoProfile.Cells.Count==8 && autoProfile.Cells[0].Owned && autoProfile.Cells[0].Seed==123 && !autoProfile.Cells[0].Enabled, "Repeated automatic registration is idempotent and preserves crop records and disabled slots.");
+var recreatedCells=autoCells.Select(c=>new GardenCell {Group=c.Group,Index=c.Index,World=c.World,Territory=c.Territory,House=c.House,Kind=c.Kind,X=c.X,Y=c.Y,Z=c.Z,LayoutInstanceKey=c.LayoutInstanceKey+1,LayoutSubId=c.LayoutSubId}).ToArray();
+Check(autoProfile.RegisterPatches(recreatedCells,()=>{})==0 && autoProfile.Cells.Count==8 && autoProfile.Cells[0].Owned && autoProfile.Cells[0].Seed==123,"Re-entering a zone must not duplicate slots or overwrite the planted crop during registration");
+{
+    var service=(HarvestService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HarvestService));
+    var visitType=typeof(HarvestService).GetNestedType("Visit",System.Reflection.BindingFlags.NonPublic)!;
+    var work=Activator.CreateInstance(visitType,true)!;
+    var arrivals=(HashSet<string>)visitType.GetField("HomeArrivals")!.GetValue(work)!;
+    var walked=(HashSet<string>)visitType.GetField("WalkedRoutes")!.GetValue(work)!;
+    arrivals.Add("bed");walked.Add("bed");
+    var stop=typeof(HarvestService).GetMethod("StopOwnedTravel",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
+    stop.Invoke(service,new object[]{work,false});
+    Check(arrivals.Contains("bed") && walked.Contains("bed"),"A cell failure must preserve completed travel and cannot trigger a fresh teleport for the next slot");
+    stop.Invoke(service,new object[]{work,true});
+    Check(arrivals.Count==0 && walked.Count==0,"Cancellation and pause invalidate the route so the next visit starts with a fresh home teleport");
+}
 var rollbackProfile = new HarvestProfile();
 try { rollbackProfile.RegisterPatches(autoCells,()=>throw new IOException("save failed")); throw new Exception("Failed bulk save accepted."); }
 catch(IOException) { Check(rollbackProfile.Cells.Count==0, "Bulk registration rolls back every new slot on persistence failure."); }

@@ -32,5 +32,5 @@ public static class GardenRegistration
 
     public static bool Matches(GardenCell cell, GardenPatch patch) => cell.Kind == patch.Kind
         && Vector3.DistanceSquared(cell.Position, patch.Origin) < 0.75f * 0.75f
-        && (cell.LayoutInstanceKey == 0 || cell.LayoutInstanceKey == patch.InstanceKey && cell.LayoutSubId == patch.SubId);
+        && (cell.LayoutInstanceKey == 0 || cell.LayoutSubId == patch.SubId);
 }

@@ -84,7 +84,7 @@ public sealed class HarvestProfile
         var next = Cells.Except(legacy).ToList();
         var added = 0;
         foreach (var cell in discovered) {
-            if (next.Any(c => SameHouse(c) && c.Kind == cell.Kind && c.LayoutInstanceKey == cell.LayoutInstanceKey && c.LayoutSubId == cell.LayoutSubId)) continue;
+            if (next.Any(c => SameHouse(c) && c.Kind == cell.Kind && Vector3.DistanceSquared(c.Position, cell.Position) < 0.75f * 0.75f && c.LayoutSubId == cell.LayoutSubId)) continue;
             next.Add(cell); added++;
         }
         Cells = next;
@@ -99,7 +99,7 @@ public sealed class HarvestProfile
         if (sameHouse.Any(c => c.Group == cell.Group && c.Index == cell.Index))
             throw new ArgumentException("같은 시설·칸 번호가 이미 등록돼 있습니다. 목록을 확인하거나 다른 번호를 선택하세요.");
         if (sameHouse.Any(c => c.Kind == cell.Kind && (c.LayoutInstanceKey != 0 && cell.LayoutInstanceKey != 0
-                ? c.LayoutInstanceKey == cell.LayoutInstanceKey && c.LayoutSubId == cell.LayoutSubId
+                ? Vector3.DistanceSquared(c.Position, cell.Position) < 0.75f * 0.75f && c.LayoutSubId == cell.LayoutSubId
                 : Vector3.Distance(c.Position, cell.Position) < 0.1f)))
             throw new ArgumentException("이미 등록한 재배 칸입니다. 게임에서 다른 칸을 선택하세요.");
         Cells.Add(cell);
