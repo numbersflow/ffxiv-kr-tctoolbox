@@ -115,9 +115,9 @@ run=Parallel();
 run.Profile.Cells.AddRange(Enumerable.Range(2,6).Select(i=>new GardenCell{Group="outdoor",Index=i,State="empty"}));
 run.Catalog.Crops[400]=new(400,401,"other outdoor crop",false,24,[]);run.Catalog.SeedCrops[401]=400;
 run.Profile.Goals.Add(new(){Item=400,Quantity=6});run.Inventory[401]=6;run.Initialize();
-Check(run.Profile.ActiveBatches.Count()==4 && run.Profile.Cells.Skip(4).Where(c=>run.Profile.BatchFor(c)!=null).Select(c=>c.Index).SequenceEqual(new[]{3,4,5,6}),
-    "A crossing at slots zero and one permits four independent ordinary plantings while guarding neighbors two and seven");
-Check(run.Profile.Batch!.Cross && run.Profile.Cells.Take(2).All(c=>c.Owned) && run.Supplies[401]==4 && run.Supplies[16026]==6,
+Check(run.Profile.ActiveBatches.Count()==4 && run.Profile.Cells.Skip(4).Where(c=>run.Profile.BatchFor(c)!=null).Select(c=>c.Index).SequenceEqual(new[]{2,3,4,5,6,7}),
+    "A short crop uses all six empty slots during a confirmed long crossing growth window");
+Check(run.Profile.Batch!.Cross && run.Profile.Cells.Take(2).All(c=>c.Owned) && run.Supplies[401]==6 && run.Supplies[16026]==8,
     "The extra crop reserves its actual free capacity without overwriting parents or the two flower plans");
 run=Parallel();run.Catalog.Crops[500]=new(500,501,"waiting flower",true,24,[]);run.Catalog.SeedCrops[501]=500;
 run.Profile.Goals.Add(new(){Item=500,Quantity=1});run.Inventory[501]=1;run.Initialize();
@@ -132,4 +132,56 @@ foreach(var blocked in new[]{Dalamud.Game.ClientState.Conditions.ConditionFlag.I
     Check(VisitDriver.TryGetBusyReason(out _,allowMountedTravel:true),"Travel admission retains the safety gate for "+blocked);
 }
 VisitDriver.SetConditions();
+VisitDriver TimedCross() {
+    var d=new VisitDriver();
+    d.Catalog.Crops[10]=new(10,11,"parent A",false,96,[]);d.Catalog.Crops[20]=new(20,21,"parent B",false,96,[]);
+    d.Catalog.Crops[30]=new(30,31,"cross goal",false,96,[]);d.Catalog.Crops[400]=new(400,401,"short crop",false,24,[]);
+    d.Catalog.SeedCrops=new(){[11]=10,[21]=20,[31]=30,[401]=400};
+    d.Profile.Cells=Enumerable.Range(0,8).Select(i=>new GardenCell{Index=i,Group="outdoor",State="empty",Observed=DateTime.UtcNow}).ToList();
+    var a=d.Profile.Cells[0];var b=d.Profile.Cells[1];var timed=d.Profile.Cells[7];
+    a.Seed=11;b.Seed=21;b.Owned=true;b.Crop=20;b.State="growing";b.Planted=b.Tended=DateTime.UtcNow;
+    timed.Seed=401;timed.Crop=400;timed.Owned=true;timed.State="growing";timed.Planted=timed.Tended=DateTime.UtcNow;
+    d.Profile.Batch=new(){Goal=31,Output=31,Cross=true,SeedA=11,SeedB=21,Required=1,Cells=[a.Id,b.Id]};
+    d.Profile.AdditionalBatches=[new(){Goal=400,Output=400,Required=1,SeedA=401,Cells=[timed.Id]}];
+    d.Profile.Goals=[new(){Item=31,Quantity=1},new(){Item=400,Quantity=1}];
+    d.Inventory=new(){[11]=1,[7766]=1};d.Initialize();return d;
+}
+run=TimedCross();
+Check(!run.Ready() && !run.Start(),"A prepared crossing cannot replant beside an unfinished temporary crop, even if its estimate has expired");
+var temporary=run.Profile.Cells[7];temporary.State="mature";run.Patches[8]=(Harvest.Core.PatchState.Ripe,400);
+Check(run.Ready() && run.Start(),"The ripe temporary crop makes the blocked crossing visit actionable");result=run.Run();
+Check(result.Result=="Succeeded" && run.Profile.Cells[0].Owned && run.Profile.Cells[1].Owned && !temporary.Owned
+    && run.Calls.FindIndex(c=>c.Id==8&&c.Action=="Harvest")<run.Calls.FindIndex(c=>c.Id==1&&c.Action=="Plant"),
+    "Harvesting the temporary crop frees its neighbor before the crossing seed is planted in the same visit");
+VisitDriver TimeCapacity(double hours=24,double elapsed=0,bool started=false) {
+    var d=Parallel();
+    foreach(var parent in d.Profile.Cells.Take(2))parent.Planted=DateTime.UtcNow.AddHours(-elapsed);
+    var extra=Enumerable.Range(2,6).Select(i=>new GardenCell{Group="outdoor",Index=i,State=started?"growing":"empty",Seed=401,
+        Crop=started?400u:0u,Owned=started,Observed=DateTime.UtcNow,Planted=started?DateTime.UtcNow:DateTime.MinValue,Tended=DateTime.UtcNow}).ToArray();
+    d.Profile.Cells.AddRange(extra);d.Catalog.Crops[400]=new(400,401,"temporary crop",false,hours,[]);d.Catalog.SeedCrops[401]=400;
+    d.Profile.Goals.Add(new(){Item=400,Quantity=6});d.Inventory[401]=6;
+    if(started)d.Profile.AdditionalBatches.Add(new(){Goal=400,Output=400,Required=6,SeedA=401,Cells=extra.Select(c=>c.Id).ToList()});
+    d.Initialize();return d;
+}
+run=TimeCapacity(96);
+Check(run.Profile.ActiveBatches.Single(b=>b.Goal==400).Cells.Count==4,
+    "A crop longer than the crossing window may use distant slots but cannot reserve the two adjacent slots");
+run=TimeCapacity();
+foreach(var parent in run.Profile.Cells.Take(2))parent.Planted=DateTime.UtcNow.AddHours(-60);
+run.Initialize();
+Check(run.Profile.ActiveBatches.Single(b=>b.Goal==400).Cells.Count==4 && run.Profile.Cells.Skip(4).Where(c=>c.Index is 2 or 7).All(c=>run.Profile.BatchFor(c)==null),
+    "Delayed procurement releases unplanted temporary reservations when their harvest no longer fits before the crossing");
+run=TimeCapacity(elapsed:60,started:true);
+Check(run.Profile.ActiveBatches.Single(b=>b.Goal==400).Cells.Count==6 && run.Profile.Cells.Skip(4).All(c=>c.Owned),
+    "An already planted crop is preserved when higher-priority work outlasts the forecast");
+run=TimeCapacity(0);
+Check(run.Profile.ActiveBatches.Single(b=>b.Goal==400).Cells.Count==4,"Unknown grow time never qualifies for borrowing an adjacent crossing slot");
+run=TimeCapacity();var budgetNow=DateTime.UtcNow;
+foreach(var parent in run.Profile.Cells.Take(2))parent.Planted=budgetNow;
+Check(GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,71,budgetNow)
+    && !GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,72,budgetNow),
+    "Forecast reserves an hour for travel and timed work rather than filling the entire remaining growth time");
+run.Profile.Cells[0].State="mature";
+Check(!GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,1,budgetNow),
+    "Observed early maturity overrides the base-duration estimate and closes the temporary planting window");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

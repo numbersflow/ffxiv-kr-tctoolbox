@@ -37,6 +37,35 @@ public static class GardenPolicy
         return distance <= 1 || distance == indices.Count - 1;
     }
 
+    public static bool FitsGrowthWindow(GardenBatch crossing, IEnumerable<GardenCell> cells,
+        IReadOnlyDictionary<uint, Crop> crops, IReadOnlyDictionary<uint, uint> seeds, double hours, DateTime now)
+    {
+        if (!crossing.Cross || crossing.Clearing || !double.IsFinite(hours) || hours <= 0) return false;
+        var parents = cells.Where(c => crossing.Cells.Contains(c.Id)).ToArray();
+        if (parents.Length != crossing.Cells.Count || parents.Length < 2 || parents.Any(c => !c.Owned || c.Pending.Length > 0
+            || c.State != "growing" || c.Observed == DateTime.MinValue || c.Error.Length > 0 || c.Planted == DateTime.MinValue || c.Planted > now
+            || !seeds.TryGetValue(c.Seed, out var item) || !crops.TryGetValue(item, out var crop) || !double.IsFinite(crop.Hours) || crop.Hours <= 0)) return false;
+        var remaining = parents.Min(c => crops[seeds[c.Seed]].Hours - (now - c.Planted).TotalHours);
+        // Leave an hour for travel and timed work; actual occupied neighbors still block cross planting if late.
+        return remaining >= hours + 1;
+    }
+
+    public static bool CrossPlantingClear(GardenBatch batch, GardenCell cell, IReadOnlyCollection<GardenCell> cells) =>
+        !batch.Cross || !cells.Any(other => !batch.Cells.Contains(other.Id) && AdjacentSlots(cell, other, cells)
+            && (other.Owned || other.Pending.Length > 0 || other.Crop != 0 && other.State != "empty"));
+
+    public static bool CanPlant(HarvestProfile profile, GardenCell cell, IReadOnlyDictionary<uint, Crop> crops,
+        IReadOnlyDictionary<uint, uint> seeds, DateTime now)
+    {
+        var batch = profile.BatchFor(cell);
+        if (batch == null || batch.Clearing) return false;
+        if (batch.Cross) return CrossPlantingClear(batch, cell, profile.Cells);
+        var hours = crops.GetValueOrDefault(batch.Output)?.Hours ?? 0;
+        return !profile.ActiveBatches.Any(cross => cross.Cross
+            && cross.Cells.Any(id => profile.Cells.Any(parent => parent.Id == id && AdjacentSlots(cell, parent, profile.Cells)))
+            && !FitsGrowthWindow(cross, profile.Cells, crops, seeds, hours, now));
+    }
+
     public static int PlantingCells(int required, int owned, int yield)
     {
         if (required < 0 || owned < 0 || yield <= 0) throw new ArgumentOutOfRangeException(nameof(yield));

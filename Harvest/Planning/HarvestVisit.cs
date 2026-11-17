@@ -204,7 +204,7 @@ internal sealed partial class HarvestService
         var batch = Profile.BatchFor(cell) ?? throw new InvalidOperationException("Missing cell plan");
         if (state == PatchState.Empty) {
             cell.Owned = false;
-            if (batch.Clearing) return null;
+            if (batch.Clearing || !CanPlant(cell)) return null;
             return AutoGardensWork.GardenAction.Plant;
         }
         if (!cell.Owned) { cell.Error = "다른 작물이 있는 칸은 자동 수확·폐기하지 않습니다."; return null; }
@@ -325,7 +325,8 @@ internal sealed partial class HarvestService
                     .Append((Item: GardenPolicy.Soil(batch.Cross, Profile.Soil), Needed: waiting.Length)).Where(p => (stock.GetValueOrDefault(p.Item)?.Inventory ?? 0) < p.Needed)
                     .Select(p => $"{catalog!.Names.GetValueOrDefault(p.Item) ?? p.Item.ToString()} {stock.GetValueOrDefault(p.Item)?.Inventory ?? 0}/{p.Needed}").ToArray();
                 work.Phase = missing.Length > 0 ? "재배 준비 미완료 · " + string.Join(", ", missing)
-                    : $"재배 칸 확인·재시도 대기 · 남은 {waiting.Length}칸";
+                    : batch.Cross && waiting.Any(c => !GardenPolicy.CrossPlantingClear(batch, c, Profile.Cells))
+                        ? "교배 재파종 대기 · 인접 작물 수확 후 진행" : $"재배 칸 확인·재시도 대기 · 남은 {waiting.Length}칸";
             }
         }
         if (result == "Succeeded" && Profile.Cells.Any(c => c.Enabled && Profile.BatchFor(c) != null && c.Pending.Length > 0)) {
