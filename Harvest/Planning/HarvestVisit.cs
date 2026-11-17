@@ -112,7 +112,7 @@ internal sealed partial class HarvestService
             var observation = garden.ReadObservation(work.Object);
             if (observation.At < work.ScanAt || observation.State == PatchState.Unknown)
                 throw new InvalidOperationException("새 작물 상태를 확인할 수 없습니다.");
-            cell.Crop = observation.Crop; cell.Observed = observation.At;
+            cell.Crop = observation.Crop; cell.Observed = observation.At; cell.Error = "";
             cell.State = observation.State switch { PatchState.Empty => "empty", PatchState.Ripe => "mature", PatchState.Withered => "withered", _ => "growing" };
             if (cell.Pending.Length > 0 && work.Verifying) {
                 Reconcile(cell, observation.State);
