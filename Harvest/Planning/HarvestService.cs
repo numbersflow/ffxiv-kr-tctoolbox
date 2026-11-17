@@ -270,8 +270,7 @@ internal sealed partial class HarvestService : IDisposable
         var reserved = retained.SelectMany(b => b.Cells).ToHashSet();
         bool Available(GardenCell cell, bool crossing) => cell.Enabled && !cell.Owned && cell.Pending.Length == 0 && !reserved.Contains(cell.Id)
             && (cell.Kind != "plot" || !retained.Where(b => crossing || b.Cross).SelectMany(b => b.Cells)
-                .Any(id => Profile.Cells.Any(c => c.Id == id && c.Kind == "plot" && c.World == cell.World && c.Territory == cell.Territory
-                    && c.House == cell.House && System.Numerics.Vector3.DistanceSquared(c.Position, cell.Position) < 0.75f * 0.75f)));
+                .Any(id => Profile.Cells.Any(c => c.Id == id && GardenPolicy.AdjacentSlots(cell, c, Profile.Cells))));
 
         foreach (var (item, quantity) in targets) {
             if (retained.Any(b => b.Goal == item)) continue;

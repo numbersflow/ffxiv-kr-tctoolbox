@@ -112,11 +112,13 @@ run.Start();result=run.Run();
 Check(run.Profile.Goals.Single(g=>g.Item==100).Complete && run.Profile.ActiveBatches.Count()==2 && run.Profile.Batch!.Cross && run.Profile.Cells[3].Owned,
     "Harvesting one flower retires only its plan while the crossing and other flower remain active");
 run=Parallel();
-run.Profile.Cells.AddRange(Enumerable.Range(4,4).Select(i=>new GardenCell{Group="outdoor",Index=i,State="empty"}));
+run.Profile.Cells.AddRange(Enumerable.Range(2,6).Select(i=>new GardenCell{Group="outdoor",Index=i,State="empty"}));
 run.Catalog.Crops[400]=new(400,401,"other outdoor crop",false,24,[]);run.Catalog.SeedCrops[401]=400;
-run.Profile.Goals.Add(new(){Item=400,Quantity=2});run.Inventory[401]=2;run.Initialize();
-Check(run.Profile.ActiveBatches.Count()==3 && run.Profile.Cells.Skip(4).All(c=>run.Profile.BatchFor(c)==null),
-    "A crossing bed cannot take an unrelated neighboring planting that could contaminate its seed result");
+run.Profile.Goals.Add(new(){Item=400,Quantity=6});run.Inventory[401]=6;run.Initialize();
+Check(run.Profile.ActiveBatches.Count()==4 && run.Profile.Cells.Skip(4).Where(c=>run.Profile.BatchFor(c)!=null).Select(c=>c.Index).SequenceEqual(new[]{3,4,5,6}),
+    "A crossing at slots zero and one permits four independent ordinary plantings while guarding neighbors two and seven");
+Check(run.Profile.Batch!.Cross && run.Profile.Cells.Take(2).All(c=>c.Owned) && run.Supplies[401]==4 && run.Supplies[16026]==6,
+    "The extra crop reserves its actual free capacity without overwriting parents or the two flower plans");
 run=Parallel();run.Catalog.Crops[500]=new(500,501,"waiting flower",true,24,[]);run.Catalog.SeedCrops[501]=500;
 run.Profile.Goals.Add(new(){Item=500,Quantity=1});run.Inventory[501]=1;run.Initialize();
 Check(run.Error.Length==0 && run.Profile.ActiveBatches.Count()==3,"Waiting for occupied pots must not report that indoor pots are unregistered");

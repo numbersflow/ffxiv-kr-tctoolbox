@@ -24,6 +24,19 @@ public static class GardenPolicy
             && (materials == null || materials.All(p => (stock.GetValueOrDefault(p.Key)?.Inventory ?? 0) >= p.Value));
     }
 
+    public static bool AdjacentSlots(GardenCell cell, GardenCell other, IEnumerable<GardenCell> cells)
+    {
+        bool SameBed(GardenCell c) => c.Kind == "plot" && cell.Kind == "plot" && c.World == cell.World
+            && c.Territory == cell.Territory && c.House == cell.House
+            && System.Numerics.Vector3.DistanceSquared(c.Position, cell.Position) < 0.75f * 0.75f;
+        if (!SameBed(other)) return false;
+        var indices = cells.Where(SameBed).Select(c => c.Index).ToHashSet();
+        // A partial or legacy registration cannot prove which slots surround the crossing.
+        if (indices.Count is not (2 or 4 or 8) || !Enumerable.Range(0, indices.Count).All(indices.Contains)) return true;
+        var distance = Math.Abs(cell.Index - other.Index);
+        return distance <= 1 || distance == indices.Count - 1;
+    }
+
     public static int PlantingCells(int required, int owned, int yield)
     {
         if (required < 0 || owned < 0 || yield <= 0) throw new ArgumentOutOfRangeException(nameof(yield));

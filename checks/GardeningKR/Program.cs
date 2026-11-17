@@ -51,6 +51,16 @@ Check(ContextMenuLayoutDerivation.Derive(SingleReset,out _) == ContextMenuLayout
     "The observed KR single-source signature remains insufficient alone; only the runtime-validated menu path accepts its candidate.");
 Check(GardenPolicy.Soil(false, 7766) == 16026 && GardenPolicy.Soil(true, 7766) == 7766,
     "Ordinary planting uses vendor potting soil; crossing preserves the configured crossing soil.");
+foreach(var slotCount in new[]{2,4,8}) {
+    var bed=Enumerable.Range(0,slotCount).Select(i=>new GardenCell{Index=i}).ToArray();
+    Check(GardenPolicy.AdjacentSlots(bed[0],bed[^1],bed) && GardenPolicy.AdjacentSlots(bed[0],bed[1],bed),
+        "Crossing protection includes both neighbors across the cyclic boundary of a "+slotCount+"-slot bed");
+    if(slotCount>2)Check(!GardenPolicy.AdjacentSlots(bed[0],bed[2],bed),"A nonadjacent slot is not blocked in a "+slotCount+"-slot bed");
+    var separate=new GardenCell{Index=0,X=10};
+    Check(!GardenPolicy.AdjacentSlots(bed[0],separate,bed.Append(separate)),"Another physical garden cannot block this garden's slots");
+}
+var partialBed=new[]{new GardenCell{Index=0},new GardenCell{Index=1},new GardenCell{Index=4}};
+Check(GardenPolicy.AdjacentSlots(partialBed[2],partialBed[0],partialBed),"An incomplete legacy layout retains conservative crossing protection");
 var partialStock = new Dictionary<uint, Stock> { [17547]=new(8,0,true), [16026]=new(1,0,true), [7766]=new(0,0,true,false) };
 var plantingCell = new GardenCell { Seed=17547 };
 Check(GardenPolicy.CanVisit(plantingCell,partialStock,16026), "One available soil allows one planting without waiting for all eight supplies.");
