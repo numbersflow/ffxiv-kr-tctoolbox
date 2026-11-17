@@ -98,7 +98,9 @@ internal static class AutomationGate
     /// 一句話的理由（給記錄與 tooltip 用）。回 <see langword="false"/> 時是空字串。
     /// </param>
     /// <returns><see langword="true"/>＝現在<b>不</b>該動手。</returns>
-    public static bool TryGetBusyReason(out string reason)
+    public static bool TryGetBusyReason(out string reason) => TryGetBusyReason(out reason, false);
+
+    public static bool TryGetBusyReason(out string reason, bool allowMountedTravel)
     {
         reason = string.Empty;
 
@@ -177,7 +179,8 @@ internal static class AutomationGate
 
         // 📌 騎乘中大部分的物件互動會被遊戲拒絕（而且是靜默的）。與其排一輪注定整批跳過的
         //    工作、把「跳過 24 格」寫進記錄，不如當成「現在不是好時機」等下一輪。
-        if (Svc.Condition[ConditionFlag.Mounted] || Svc.Condition[ConditionFlag.InFlight] ||
+        // Workflow visits travel home first; Lifestream lands and dismounts before any crop interaction.
+        if ((!allowMountedTravel && (Svc.Condition[ConditionFlag.Mounted] || Svc.Condition[ConditionFlag.InFlight])) ||
             Svc.Condition[ConditionFlag.Diving])
         {
             reason = "騎乘／飛行／潛水中";

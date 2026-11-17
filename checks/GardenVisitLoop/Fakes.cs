@@ -2,6 +2,9 @@ using System.Numerics;
 using System.Text.Json;
 using Harvest.Core;
 using Harvest.Planning;
+namespace Dalamud.Game.ClientState.Conditions {
+    public enum ConditionFlag { BetweenAreas,BetweenAreas51,LoggingOut,WatchingCutscene,WatchingCutscene78,OccupiedInCutSceneEvent,InCombat,Crafting,PreparingToCraft,Gathering,Fishing,BoundByDuty,Unconscious,Casting,Jumping,Mounted,InFlight,Diving,Occupied,Occupied30,Occupied33,Occupied38,Occupied39,OccupiedInEvent,OccupiedInQuestEvent,OccupiedSummoningBell }
+}
 namespace LocalAutomation {
     public record AutomationObservation(bool Busy,int Completed,int Total,string Phase,string Result="",string Detail="",long Progress=0);
     internal record AutomationWork(Func<bool> Start,Action Stop,Func<AutomationObservation> Observe,Func<bool>? CanCancel=null,Action? Unload=null,Action? Disconnect=null,Action<bool,bool>? Pause=null,Func<string>? PauseState=null);
@@ -42,6 +45,7 @@ namespace Harvest.Planning {
         internal class GardenSettings {public bool AutoLoopEnabled;}
         internal GardenSettings GardensWork=new();public void Save() { }
     }
+    internal static class NavStop { internal static bool IsEnforcing=>false; }
     internal static class ExternalNav {
         internal static bool TryGetActiveMover(out string? mover){mover=null;return false;}
         internal static bool IsVnavmeshPathRunning()=>false;
@@ -63,6 +67,9 @@ namespace Harvest.Planning {
         internal Gate<T> GetIpcSubscriber<A,T>(string name)=>new(name);
     }
     internal static class Svc {
+        internal class Client {internal bool IsLoggedIn=true;}
+        internal class Flags {internal HashSet<Dalamud.Game.ClientState.Conditions.ConditionFlag> Active=[];internal bool this[Dalamud.Game.ClientState.Conditions.ConditionFlag flag]=>Active.Contains(flag);}
+        internal static Client ClientState=new();internal static Flags Condition=new();
         internal class Player {internal ulong ContentId=10;internal Vector3 Position=Vector3.Zero;}
         internal class ObjectTable {internal Player? LocalPlayer=new();}
         internal class LogService {internal void Information(string message) { }}
@@ -85,6 +92,8 @@ namespace Harvest.Planning {
         private class Recording {internal bool Active;}
         private Recording? routeRecording=null;
         private LocalAutomation.AutomationWork work=null!;
+        private static bool TryGetEmergencyStopReason(out string reason){reason="";return false;}
+        public static void SetConditions(params Dalamud.Game.ClientState.Conditions.ConditionFlag[] flags)=>Svc.Condition.Active=flags.ToHashSet();
         public VisitDriver(){Current=this;Svc.PlayerState.ContentId=10;}
         public void Initialize() {
             stock=Catalog.Crops.Keys.Concat(Catalog.SeedCrops.Keys).Concat(Inventory.Keys).Append(16026u).Append(7766u).Distinct()

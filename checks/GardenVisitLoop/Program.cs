@@ -120,4 +120,14 @@ Check(run.Profile.ActiveBatches.Count()==3 && run.Profile.Cells.Skip(4).All(c=>r
 run=Parallel();run.Catalog.Crops[500]=new(500,501,"waiting flower",true,24,[]);run.Catalog.SeedCrops[501]=500;
 run.Profile.Goals.Add(new(){Item=500,Quantity=1});run.Inventory[501]=1;run.Initialize();
 Check(run.Error.Length==0 && run.Profile.ActiveBatches.Count()==3,"Waiting for occupied pots must not report that indoor pots are unregistered");
+VisitDriver.SetConditions(Dalamud.Game.ClientState.Conditions.ConditionFlag.Mounted,Dalamud.Game.ClientState.Conditions.ConditionFlag.InFlight);
+Check(!VisitDriver.TryGetBusyReason(out _,allowMountedTravel:true) && VisitDriver.TryGetBusyReason(out _),
+    "The workflow may acquire its home-travel phase while mounted; direct crop automation still rejects mounted interaction");
+foreach(var blocked in new[]{Dalamud.Game.ClientState.Conditions.ConditionFlag.InCombat,Dalamud.Game.ClientState.Conditions.ConditionFlag.Fishing,
+    Dalamud.Game.ClientState.Conditions.ConditionFlag.Crafting,Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas,
+    Dalamud.Game.ClientState.Conditions.ConditionFlag.Diving,Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedSummoningBell}) {
+    VisitDriver.SetConditions(blocked);
+    Check(VisitDriver.TryGetBusyReason(out _,allowMountedTravel:true),"Travel admission retains the safety gate for "+blocked);
+}
+VisitDriver.SetConditions();
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");
