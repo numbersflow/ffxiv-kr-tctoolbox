@@ -63,7 +63,7 @@ public static class GardenPolicy
         foreach (var item in selected) {
             var seed = crops.TryGetValue(item, out var crop) ? crop.Seed : seedCrops.ContainsKey(item) ? item : 0;
             if (seed == 0 || crop?.Flower == true) continue;
-            if (profile.Batch is { Cross: true, Clearing: false } batch && batch.Goal == item
+            if (profile.ActiveBatches.Any(batch => batch.Cross && !batch.Clearing && batch.Goal == item)
                 || stock.GetValueOrDefault(seed)?.CanProcure != true && crosses.Any(c => c.Output == seed))
                 return new() { [profile.Soil] = slots * 3 };
         }

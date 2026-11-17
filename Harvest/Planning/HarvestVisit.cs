@@ -28,6 +28,7 @@ internal sealed partial class HarvestService
         public DateTime PauseAt;
         public string Phase = "준비";
         public HashSet<string> Done = [], Acted = [], Tended = [];
+        public HashSet<GardenBatch> Plans = [];
         public int Verified, Plants, Tends, Harvests, Feeds;
         public int Completed, Failed, RequiredSpace;
     }
@@ -39,8 +40,8 @@ internal sealed partial class HarvestService
             CareOnly = arguments.TryGetProperty("CareOnly", out var care) && care.GetBoolean(),
             ReservedSlots = arguments.TryGetProperty("ReservedFreeSlots", out var slots) ? Math.Clamp(slots.GetInt32(), 0, 139) : 8 };
         return new(() => {
-            if (work.Owner == 0 || work.Owner != Svc.PlayerState.ContentId || routeRecording?.Active == true || Profile.Batch == null || !HasDueVisit()
-                || !Profile.Cells.Any(c => c.Enabled && Profile.Batch.Cells.Contains(c.Id) && Due(c) && ReadyForVisit(c))) return false;
+            if (work.Owner == 0 || work.Owner != Svc.PlayerState.ContentId || routeRecording?.Active == true || !Profile.ActiveBatches.Any() || !HasDueVisit()
+                || !Profile.Cells.Any(c => c.Enabled && Profile.BatchFor(c) != null && Due(c) && ReadyForVisit(c))) return false;
             config.GardensWork.AutoLoopEnabled = false;
             garden.Enable();
             if (!garden.IsEnabled) return false;
@@ -72,17 +73,18 @@ internal sealed partial class HarvestService
             if (work.Cancel) return End(work, "Cancelled");
             if (work.Paused) return Busy(work, "일시정지");
             if (work.Cell == null) {
-                var batch = Profile.Batch;
-                var waiting = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true
+                var waiting = Profile.Cells.Where(c => c.Enabled && Profile.BatchFor(c) != null
                     && !work.Done.Contains(c.Id) && !c.Owned && c.Pending.Length == 0 && Due(c)).ToArray();
                 if (waiting.Length > 0) {
-                    try { ReadVisitInventory(waiting.Select(c => c.Seed).Append(CurrentSoil).Where(i => i > 0)); }
+                    try { ReadVisitInventory(waiting.SelectMany(c => new[] { c.Seed, SoilFor(c) }).Where(i => i > 0)); }
                     catch (Exception ex) { work.Phase = "재고 재확인 대기 · " + ex.Message; return End(work, "Partial"); }
                 }
-                work.Cell = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true && !work.Done.Contains(c.Id) && c.RetryAt <= DateTime.UtcNow && (c.Owned || c.Pending.Length > 0 || Due(c)))
-                    .Where(c => GardenPolicy.CanVisit(c, stock, CurrentSoil, GardenPolicy.PlantingReady(batch!, Profile.Cells, stock, CurrentSoil, supplies)))
+                work.Cell = Profile.Cells.Where(c => c.Enabled && Profile.BatchFor(c) != null && !work.Done.Contains(c.Id) && c.RetryAt <= DateTime.UtcNow
+                    && (work.Plans.Contains(Profile.BatchFor(c)!) || Due(c) && ReadyForVisit(c)))
+                    .Where(c => CanVisit(c))
                     .OrderBy(c => c.Owned || c.Pending.Length > 0 ? 0 : 1).FirstOrDefault();
                 if (work.Cell == null) return End(work, work.Failed == 0 ? "Succeeded" : "Partial");
+                work.Plans.Add(Profile.BatchFor(work.Cell)!);
                 work.StepAt = DateTime.UtcNow; work.Scanning = false; work.Verifying = false;
             }
             var cell = work.Cell;
@@ -153,7 +155,7 @@ internal sealed partial class HarvestService
                         } catch (Exception ex) { work.Phase = "수확 재고·다음 계획 확인 대기 · " + ex.Message; return End(work, "Partial"); }
                     }
                 } else if (!work.CareOnly && completedAction is "Plant" or "Fertilize") {
-                    try { ReadVisitInventory(new[] { cell.Seed, CurrentSoil }.Concat(Colors(cell))); Replan(); }
+                    try { ReadVisitInventory(new[] { cell.Seed, SoilFor(cell) }.Concat(Colors(cell))); Replan(); }
                     catch (Exception ex) { work.Phase = "심기·색상 재고 반영 대기 · " + ex.Message; return End(work, "Partial"); }
                 }
                 return Busy(work, "처리 결과 확인 · 후속 작업 계속");
@@ -167,7 +169,7 @@ internal sealed partial class HarvestService
                 : action == AutoGardensWork.GardenAction.Fertilize ? Colors(cell).ElementAt(cell.ColorStep) : 0;
             cell.Before = consumed == 0 ? 0 : Bag(consumed);
             if (consumed > 0 && cell.Before == 0) { FinishCell(work); return Busy(work, "재료 준비 대기"); }
-            if (action == AutoGardensWork.GardenAction.Plant && Bag(CurrentSoil) == 0) { FinishCell(work); return Busy(work, "흙 준비 대기"); }
+            if (action == AutoGardensWork.GardenAction.Plant && Bag(SoilFor(cell)) == 0) { FinishCell(work); return Busy(work, "흙 준비 대기"); }
             if (action == AutoGardensWork.GardenAction.Harvest && FreeSlots() < HarvestSlots(cell) + work.ReservedSlots) {
                 work.RequiredSpace = HarvestSlots(cell) + work.ReservedSlots;
                 throw new InvalidOperationException("가방 여유 부족 · 작물과 교배 씨앗 수용 공간 필요");
@@ -190,17 +192,16 @@ internal sealed partial class HarvestService
 
     private void ReplanAfterHarvest(Visit work)
     {
-        ReadVisitInventory(catalog!.Crops.Keys.Concat(catalog.SeedCrops.Keys).Append(CurrentSoil));
-        var previous = Profile.Batch;
+        ReadVisitInventory(catalog!.Crops.Keys.Concat(catalog.SeedCrops.Keys).Concat(new[] { Profile.Soil, 16026u, 14011u, 14012u, 14013u }));
+        var previous = Profile.ActiveBatches.ToArray();
         Replan();
-        if (!ReferenceEquals(previous, Profile.Batch)) work.Done.Clear();
-        else if (Profile.Batch is { } remaining) work.Done.RemoveWhere(id => Profile.Cells.Any(c => c.Id == id
-            && remaining.Cells.Contains(id) && (!c.Owned || c.State == "mature" && remaining.Clearing)));
+        work.Done.RemoveWhere(id => Profile.Cells.Any(c => c.Id == id && Profile.BatchFor(c) is { } remaining
+            && (!previous.Contains(remaining) || !c.Owned || c.State == "mature" && remaining.Clearing)));
     }
 
     private AutoGardensWork.GardenAction? Choose(GardenCell cell, PatchState state)
     {
-        var batch = Profile.Batch!;
+        var batch = Profile.BatchFor(cell) ?? throw new InvalidOperationException("Missing cell plan");
         if (state == PatchState.Empty) {
             cell.Owned = false;
             if (batch.Clearing) return null;
@@ -217,7 +218,7 @@ internal sealed partial class HarvestService
         return null;
     }
 
-    private uint[] Colors(GardenCell cell) => catalog != null && Profile.Batch is { Cross: false } batch && catalog!.Crops.TryGetValue(batch.Output, out var crop) ? crop.Colors : [];
+    private uint[] Colors(GardenCell cell) => catalog != null && Profile.BatchFor(cell) is { Cross: false } batch && catalog!.Crops.TryGetValue(batch.Output, out var crop) ? crop.Colors : [];
     private void Reconcile(GardenCell cell, PatchState state)
     {
         var action = cell.Pending;
@@ -226,7 +227,7 @@ internal sealed partial class HarvestService
             if (!catalog!.SeedCrops.TryGetValue(cell.Seed, out var expected) || cell.Crop != expected)
                 throw new InvalidOperationException("심기 결과의 작물이 계획과 다릅니다.");
             cell.Owned = true; cell.Planted = cell.Tended = DateTime.UtcNow; cell.ColorStep = 0;
-            _ = Bag(CurrentSoil);
+            _ = Bag(SoilFor(cell));
         } else if (action == "Harvest") {
             if (state != PatchState.Empty) throw new InvalidOperationException("수확 결과 미확정 · 재전송하지 않습니다.");
             cell.Owned = false; cell.Planted = DateTime.MinValue; cell.ColorStep = 0;
@@ -242,7 +243,7 @@ internal sealed partial class HarvestService
     }
     private void Queue(Visit work, AutoGardensWork.GardenAction action, uint item = 0)
     {
-        var message = garden.EnqueueSingle(action, work.Object, item, work.Cell!.Seed, CurrentSoil);
+        var message = garden.EnqueueSingle(action, work.Object, item, work.Cell!.Seed, SoilFor(work.Cell));
         if (message.Length > 0) throw new InvalidOperationException(message);
     }
     private int Bag(uint item) => ReadVisitInventory(new[] { item })[item];
@@ -275,7 +276,7 @@ internal sealed partial class HarvestService
     {
         // Gardening sheets do not expose yield. Reserve one full stack per possible output.
         var crop = catalog!.SeedCrops.GetValueOrDefault(cell.Seed);
-        var seeds = Profile.Batch is { Cross: true } batch
+        var seeds = Profile.BatchFor(cell) is { Cross: true } batch
             ? catalog.Crosses.Where(c => c.A == batch.SeedA && c.B == batch.SeedB || c.B == batch.SeedA && c.A == batch.SeedB)
                 .Select(c => c.Output).Distinct().ToArray() : [];
         return (crop == 0 ? 1 : OutputSlots(crop)) + (seeds.Length == 0 ? 0 : seeds.Max(OutputSlots));
@@ -310,41 +311,42 @@ internal sealed partial class HarvestService
     private AutomationObservation Busy(Visit work, string phase)
     {
         work.Phase = phase;
-        return new(true, work.Completed, Math.Max(work.Completed, Profile.Batch?.Cells.Count ?? 1), "Gardening:" + phase, "", phase, work.Verified);
+        return new(true, work.Completed, Math.Max(work.Completed, Profile.ActiveBatches.Sum(b => b.Cells.Count)), "Gardening:" + phase, "", phase, work.Verified);
     }
     private AutomationObservation End(Visit work, string result)
     {
-        if (result == "Succeeded" && Profile.Batch is { Clearing: false } batch) {
+        foreach (var batch in Profile.ActiveBatches.Where(b => !b.Clearing)) {
+            if (result != "Succeeded") break;
             var waiting = Profile.Cells.Where(c => c.Enabled && batch.Cells.Contains(c.Id) && !c.Owned
                 && c.Pending.Length == 0 && c.State is "empty" or "unscanned").ToArray();
             if (waiting.Length > 0) {
                 result = "Partial";
                 var missing = waiting.GroupBy(c => c.Seed).Select(g => (Item: g.Key, Needed: g.Count()))
-                    .Append((Item: CurrentSoil, Needed: waiting.Length)).Where(p => (stock.GetValueOrDefault(p.Item)?.Inventory ?? 0) < p.Needed)
+                    .Append((Item: GardenPolicy.Soil(batch.Cross, Profile.Soil), Needed: waiting.Length)).Where(p => (stock.GetValueOrDefault(p.Item)?.Inventory ?? 0) < p.Needed)
                     .Select(p => $"{catalog!.Names.GetValueOrDefault(p.Item) ?? p.Item.ToString()} {stock.GetValueOrDefault(p.Item)?.Inventory ?? 0}/{p.Needed}").ToArray();
                 work.Phase = missing.Length > 0 ? "재배 준비 미완료 · " + string.Join(", ", missing)
                     : $"재배 칸 확인·재시도 대기 · 남은 {waiting.Length}칸";
             }
         }
-        if (result == "Succeeded" && Profile.Batch is { } current && Profile.Cells.Any(c => c.Enabled && current.Cells.Contains(c.Id) && c.Pending.Length > 0)) {
+        if (result == "Succeeded" && Profile.Cells.Any(c => c.Enabled && Profile.BatchFor(c) != null && c.Pending.Length > 0)) {
             result = "Partial"; work.Phase = "처리 결과 확인 대기 · 미확정 조작을 재전송하지 않습니다.";
         }
-        if (result == "Succeeded" && Profile.Batch is { } colorBatch && Profile.Cells.Any(c => c.Enabled && colorBatch.Cells.Contains(c.Id)
+        if (result == "Succeeded" && Profile.Cells.Any(c => c.Enabled && Profile.BatchFor(c) != null
             && c.Owned && c.ColorStep < Colors(c).Length && c.ColorFed.AddHours(1) <= DateTime.UtcNow
             && (stock.GetValueOrDefault(Colors(c)[c.ColorStep])?.Inventory ?? 0) == 0)) {
             result = "Partial"; work.Phase = "색상 재료 준비 대기 · 다음 방문 전에 보충합니다.";
         }
-        if (result == "Succeeded" && Profile.Batch is { } blocked && Profile.Cells.Any(c => c.Enabled && blocked.Cells.Contains(c.Id)
+        if (result == "Succeeded" && Profile.Cells.Any(c => c.Enabled && Profile.BatchFor(c) != null
             && (c.State == "withered" || !c.Owned && c.Crop != 0))) {
             result = "Partial"; work.Phase = "작물 확인 필요 · 마른 작물·다른 작물을 자동 폐기하지 않습니다.";
         }
         if (result == "Succeeded") work.Phase = $"이번 방문 완료 · 심기 {work.Plants}, 관리 {work.Tends}, 수확 {work.Harvests}, 색상 {work.Feeds} · "
-            + (Profile.Batch == null ? "현재 목표 처리 완료" : "성장·다음 관리 대기");
+            + (!Profile.ActiveBatches.Any() ? "현재 목표 처리 완료" : "성장·다음 관리 대기");
         snapshot = JsonSerializer.Serialize(new { Available = true, Character = owner, Ready = false, Detail = work.Phase, Supply = (object?)null,
             Goals = Profile.Goals, BookItems = Profile.BookItems, Growable = catalog?.Crops.Keys,
             Searchable = catalog?.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         visit = null; nextRefresh = DateTime.MinValue; config.Save();
-        return new(false, work.Completed, Math.Max(work.Completed, Profile.Batch?.Cells.Count ?? 1),
+        return new(false, work.Completed, Math.Max(work.Completed, Profile.ActiveBatches.Sum(b => b.Cells.Count)),
             work.RequiredSpace > 0 ? "Gardening:BagSpace/" + work.RequiredSpace : "Gardening", result, work.Phase, work.Verified);
     }
 }

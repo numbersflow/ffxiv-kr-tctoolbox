@@ -85,7 +85,6 @@ namespace Harvest.Planning {
         private class Recording {internal bool Active;}
         private Recording? routeRecording=null;
         private LocalAutomation.AutomationWork work=null!;
-        private uint CurrentSoil=>GardenPolicy.Soil(Profile.Batch?.Cross==true,Profile.Soil);
         public VisitDriver(){Current=this;Svc.PlayerState.ContentId=10;}
         public void Initialize() {
             stock=Catalog.Crops.Keys.Concat(Catalog.SeedCrops.Keys).Concat(Inventory.Keys).Append(16026u).Append(7766u).Distinct()
@@ -94,7 +93,7 @@ namespace Harvest.Planning {
                 Patches.TryAdd(id,(c.Owned?c.State=="mature"?PatchState.Ripe:PatchState.Growing:PatchState.Empty,c.Crop));}
             Replan();
         }
-        public bool Ready()=>Profile.Batch!=null && HasDueVisit() && Profile.Cells.Any(c=>Profile.Batch.Cells.Contains(c.Id)&&c.Enabled&&Due(c)&&ReadyForVisit(c));
+        public bool Ready()=>Profile.ActiveBatches.Any() && HasDueVisit() && Profile.Cells.Any(c=>Profile.BatchFor(c)!=null&&c.Enabled&&Due(c)&&ReadyForVisit(c));
         public bool Start(bool careOnly=false){using var args=JsonDocument.Parse(JsonSerializer.Serialize(new{CareOnly=careOnly}));work=CreateWork("Gardening",args.RootElement);return work.Start();}
         public LocalAutomation.AutomationObservation Tick()=>work.Observe();
         public LocalAutomation.AutomationObservation Run(){for(int i=0;i<300;i++){var r=Tick();if(!r.Busy)return r;}throw new Exception("Visit did not settle: "+error);}

@@ -80,7 +80,7 @@ public sealed class HarvestProfile
         if (legacy.Any(c => c.Owned || c.Pending.Length > 0))
             throw new InvalidOperationException("기존 칸의 진행 중 재배 기록을 확인해야 합니다. 자동 등록으로 덮어쓰지 않습니다.");
         var previous = Cells;
-        var previousBatch = Batch;
+        var previousBatches = ActiveBatches.ToArray();
         var next = Cells.Except(legacy).ToList();
         var added = 0;
         foreach (var cell in discovered) {
@@ -88,9 +88,9 @@ public sealed class HarvestProfile
             next.Add(cell); added++;
         }
         Cells = next;
-        if (Batch != null && legacy.Any(c => Batch.Cells.Contains(c.Id))) Batch = null;
+        SetBatches(ActiveBatches.Where(b => !legacy.Any(c => b.Cells.Contains(c.Id))).ToArray());
         try { persist(); }
-        catch { Cells = previous; Batch = previousBatch; throw; }
+        catch { Cells = previous; SetBatches(previousBatches); throw; }
         return added;
     }
     public void RegisterCell(GardenCell cell, Action persist)
@@ -124,6 +124,15 @@ public sealed class HarvestProfile
         return route;
     }
     public GardenBatch? Batch { get; set; }
+    public List<GardenBatch> AdditionalBatches { get; set; } = [];
+    [Newtonsoft.Json.JsonIgnore, System.Text.Json.Serialization.JsonIgnore]
+    public IEnumerable<GardenBatch> ActiveBatches => Batch == null ? AdditionalBatches : new[] { Batch }.Concat(AdditionalBatches);
+    public GardenBatch? BatchFor(GardenCell cell) => ActiveBatches.FirstOrDefault(b => b.Cells.Contains(cell.Id));
+    public void SetBatches(IEnumerable<GardenBatch> batches)
+    {
+        var all = batches.ToArray();
+        Batch = all.FirstOrDefault(); AdditionalBatches = all.Skip(1).ToList();
+    }
     public uint Soil { get; set; } = 7766;
     public DateTime RetryAt { get; set; }
     public void SelectCell(string id, bool selected)

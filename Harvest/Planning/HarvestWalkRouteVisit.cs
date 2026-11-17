@@ -12,10 +12,17 @@ internal sealed partial class HarvestService
         phase = "개인주택 텔레포트";
         if (work.FailedRoutes.Contains(cell.Group)) throw new InvalidOperationException("이번 방문에서 해당 경로가 실패하여 재이동을 보류합니다.");
         var busy = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
-        if (!work.HomeArrivals.Contains(cell.Group)) {
+        var arrivalKey = cell.Kind == "pot" ? $"pot:{cell.World}:{cell.Territory}:{cell.House}:{cell.Travel}" : cell.Group;
+        if (work.HomeArrivals.Contains(arrivalKey) && !work.Travel && !AtCell(cell)) {
+            work.HomeArrivals.Remove(arrivalKey); work.WalkedRoutes.Remove(cell.Group);
+        }
+        if (!work.HomeArrivals.Contains(arrivalKey)) {
             if (!work.Travel) {
                 if (busy.InvokeFunc() || ExternalNav.TryGetActiveMover(out _)) return true;
-                if (Profile.WalkRoutes.ContainsKey(cell.Group)) {
+                if (cell.Kind == "pot") {
+                    // Enter_house=2: indoor crops must not depend on the user's default home-entry mode.
+                    Svc.PluginInterface.GetIpcSubscriber<int, int?, object>("Lifestream.EnqueuePropertyShortcut").InvokeAction(1, 2);
+                } else if (Profile.WalkRoutes.ContainsKey(cell.Group)) {
                     // PropertyType.Home=1, HouseEnterMode.None=0: the recorded outdoor path owns the walk after teleport.
                     Svc.PluginInterface.GetIpcSubscriber<int, int?, object>("Lifestream.EnqueuePropertyShortcut").InvokeAction(1, 0);
                 } else Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction("home");
@@ -33,7 +40,7 @@ internal sealed partial class HarvestService
                 if (DateTime.UtcNow - work.ArrivalCheckAt < TimeSpan.FromSeconds(10)) return true;
                 throw new InvalidOperationException("개인주택 도착 정보를 기다렸지만 저장한 도보 경로와 일치하지 않습니다.");
             }
-            work.Travel = false; work.ArrivalCheckAt = DateTime.MinValue; work.HomeArrivals.Add(cell.Group);
+            work.Travel = false; work.ArrivalCheckAt = DateTime.MinValue; work.HomeArrivals.Add(arrivalKey);
         }
         phase = "저장한 도보 경로 이동";
         if (!Profile.WalkRoutes.TryGetValue(cell.Group, out var route)) return false;

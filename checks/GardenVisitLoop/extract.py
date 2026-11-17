@@ -4,7 +4,8 @@ import sys
 root = Path(sys.argv[1])
 visit = (root / "HarvestVisit.cs").read_text(encoding="utf-8-sig")
 service = (root / "HarvestService.cs").read_text(encoding="utf-8-sig")
-parts = [visit[visit.index("    private sealed class Visit"):visit.index("    private static unsafe int FreeSlots()")],
+parts = [service[service.index("    private uint SoilFor("):service.index("    public HarvestService(")],
+         visit[visit.index("    private sealed class Visit"):visit.index("    private static unsafe int FreeSlots()")],
          visit[visit.index("    private void StopOwnedTravel("):visit.rindex("\n}")],
          service[service.index("    private void Replan()"):service.index("    public void Dispose()")]]
 for part in parts:

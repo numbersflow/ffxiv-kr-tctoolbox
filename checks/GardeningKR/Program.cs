@@ -394,6 +394,22 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
         return ((Dictionary<uint,int>)typeof(HarvestService).GetField("supplies",flags)!.GetValue(service)!,
             (string)typeof(HarvestService).GetField("error",flags)!.GetValue(service)!);
     }
+    var mixedProfile=new HarvestProfile {
+        Goals=[new(){Item=7774,Quantity=1},new(){Item=14071,Quantity=1},new(){Item=14072,Quantity=1}],
+        Cells=[new(){Index=0,Kind="plot",Owned=true,Seed=7744,Crop=4842,State="growing"},
+            new(){Index=1,Kind="plot",Owned=true,Seed=13768,Crop=12882,State="growing"},
+            new(){Group="Indoor 1",Kind="pot",State="empty"},new(){Group="Indoor 2",Kind="pot",State="empty"}]
+    };
+    mixedProfile.Batch=new(){Goal=7774,Output=8167,Cross=true,Required=1,SeedA=7744,SeedB=13768,Cells=mixedProfile.Cells.Take(2).Select(c=>c.Id).ToList()};
+    var preserved=mixedProfile.Batch;
+    var mixed=Prepare(mixedProfile,14007,7744,13768);
+    Check(mixedProfile.ActiveBatches.Count()==3 && ReferenceEquals(preserved,mixedProfile.Batch) && mixed.Supplies[14007]==2 && mixed.Supplies[16026]==2,
+        "Installed KR flowers reserve two shared seeds and ordinary soils alongside the unchanged jute ancestor crossing");
+    Check(mixedProfile.AdditionalBatches.All(b=>b.Cells.All(id=>mixedProfile.Cells.Single(c=>c.Id==id).Kind=="pot")),
+        "Both installed flower variants reserve indoor pots rather than any outdoor crossing cell");
+    var parallelRoundTrip=JsonConvert.DeserializeObject<HarvestProfile>(JsonConvert.SerializeObject(mixedProfile))!;
+    Check(parallelRoundTrip.ActiveBatches.Count()==3 && parallelRoundTrip.Cells.Take(2).All(c=>c.Owned) && parallelRoundTrip.BatchFor(parallelRoundTrip.Cells[3])?.Goal==14072,
+        "The actual configuration serializer preserves all plans, parents and per-pot goals");
     var noFacility = Prepare(new() { Goals=[new() { Item=14071, Quantity=1 }] },14007);
     Check(noFacility.Supplies.Count == 0, "Actual Replan must not procure seeds when no target cells are registered.");
     var wrongFacility = Prepare(new() { Goals=[new() { Item=14071, Quantity=1 }], Cells=[new() { Kind="plot" }] },14007);

@@ -48,4 +48,15 @@ Check(service.Run(cell) && Svc.PluginInterface.HomeRequests==recoverRequests && 
 service=new HarvestService(route);service.MarkFailed();var failedHomeRequests=Svc.PluginInterface.HomeRequests;
 try{service.Run(cell);throw new Exception("A failed group restarted travel");}catch(InvalidOperationException){checks++;}
 Check(Svc.PluginInterface.HomeRequests==failedHomeRequests,"A failed route cannot teleport again for another cell during the same visit");
+var pot=new GardenCell{Group="indoor A",Kind="pot",World=1,Territory=20,House=3};
+var otherPot=new GardenCell{Group="indoor B",Kind="pot",World=1,Territory=20,House=3};
+service=new(route);service.RemoveRoute();Svc.PluginInterface.HouseOverride=0;
+var beforeIndoor=Svc.PluginInterface.HomeRequests;
+Check(service.Run(pot) && Svc.PluginInterface.TravelMode==2,"Indoor visits explicitly enter the house even when the default is teleport-only");
+service.CurrentKind="pot";service.TeleportFinished();
+Check(!service.Run(pot) && !service.Run(otherPot) && Svc.PluginInterface.HomeRequests==beforeIndoor+1,
+    "Two independently named pots in the same house share one indoor arrival");
+service.CurrentKind="plot";
+Check(service.Run(pot) && Svc.PluginInterface.HomeRequests==beforeIndoor+2,
+    "Returning indoors after an outdoor task must reacquire indoor arrival instead of trusting the old cache");
 Console.WriteLine($"PASS {checks} actual garden walk visit checks; no native game actions executed.");
