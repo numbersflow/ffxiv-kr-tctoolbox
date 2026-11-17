@@ -59,4 +59,13 @@ Check(!service.Run(pot) && !service.Run(otherPot) && Svc.PluginInterface.HomeReq
 service.CurrentKind="plot";
 Check(service.Run(pot) && Svc.PluginInterface.HomeRequests==beforeIndoor+2,
     "Returning indoors after an outdoor task must reacquire indoor arrival instead of trusting the old cache");
+service=new(route);service.RemoveRoute();service.Run(pot);service.TeleportFinished();
+var delayedIndoorRequests=Svc.PluginInterface.HomeRequests;
+Check(service.Run(pot) && service.Run(pot) && Svc.PluginInterface.HomeRequests==delayedIndoorRequests,
+    "Lifestream can finish its entrance confirmation before the indoor zone loads; wait without another teleport");
+service.CurrentKind="pot";
+Check(!service.Run(pot) && !service.Run(otherPot) && Svc.PluginInterface.HomeRequests==delayedIndoorRequests,
+    "A settled indoor arrival releases both pots after the same pending teleport");
+service=new(route);service.RemoveRoute();service.Run(pot);service.TeleportFinished();service.Run(pot);service.ArrivalTimedOut();
+try{service.Run(pot);throw new Exception("Wrong indoor house accepted");}catch(InvalidOperationException){checks++;}
 Console.WriteLine($"PASS {checks} actual garden walk visit checks; no native game actions executed.");

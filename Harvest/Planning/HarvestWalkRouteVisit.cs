@@ -33,6 +33,13 @@ internal sealed partial class HarvestService
                 work.ArrivalCheckAt = DateTime.MinValue;
                 return true;
             }
+            if (cell.Kind == "pot" && !AtCell(cell)) {
+                phase = "실내 입장·주택 정보 확인";
+                if (work.ArrivalCheckAt == DateTime.MinValue) work.ArrivalCheckAt = DateTime.UtcNow;
+                if (DateTime.UtcNow - work.ArrivalCheckAt < TimeSpan.FromSeconds(10)) return true;
+                Svc.Log.Information($"Garden indoor arrival mismatch: expected={cell.World}:{cell.Territory}:{cell.House}, actual={CurrentRouteLocation()}");
+                throw new InvalidOperationException("실내 입장 후 등록한 주택 정보를 확인할 수 없습니다.");
+            }
             if (Profile.WalkRoutes.TryGetValue(cell.Group, out var arrivalRoute)
                 && (Svc.Objects.LocalPlayer is not { } arrivedPlayer || !arrivalRoute.CanJoin(CurrentRouteLocation(), arrivedPlayer.Position))) {
                 phase = "주택 도착 정보 확인";

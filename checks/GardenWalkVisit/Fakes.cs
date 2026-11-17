@@ -16,7 +16,8 @@ namespace Harvest.Core {
  internal static class ExternalNav {internal static bool TryGetActiveMover(out string? name){name=null;return false;}}
 }
 namespace Harvest.Planning {
- internal static class Svc { internal static Core.FakeObjects Objects=new(); internal static Core.FakeIpc PluginInterface=new(); }
+ internal sealed class FakeLog {internal void Information(string message) { }}
+ internal static class Svc { internal static FakeLog Log=new(); internal static Core.FakeObjects Objects=new(); internal static Core.FakeIpc PluginInterface=new(); }
  internal sealed partial class HarvestService {
   private sealed class Visit {public HashSet<string> WalkedRoutes=[],HomeArrivals=[],FailedRoutes=[];public bool Travel,RouteWalking;public DateTime StepAt,TravelAt,ArrivalCheckAt;}
   private readonly Visit work=new();
