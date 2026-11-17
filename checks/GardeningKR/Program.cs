@@ -381,6 +381,13 @@ Check(CropNameMatching.Resolve("알 수 없는 꽃이", new Dictionary<string, u
 using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV - KOREA\game\sqpack",
     new Lumina.LuminaOptions { PanicOnSheetChecksumMismatch = false, DefaultExcelLanguage = (Lumina.Data.Language)7 })) {
     var catalog = new Catalog(game.GetExcelSheet<Lumina.Excel.Sheets.Item>(), game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>());
+    typeof(Svc).GetProperty("Log")!.SetValue(null,System.Reflection.DispatchProxy.Create<Dalamud.Plugin.Services.IPluginLog,ConfigSaveProxy>());
+    typeof(GardenCropData).GetMethod("EnsureBuilt",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!
+        .Invoke(null,[game.GetExcelSheet<Lumina.Excel.Sheets.Item>(),game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>()]);
+    var cherrySeedName=game.GetExcelSheet<Lumina.Excel.Sheets.Item>()!.GetRow(17546).Name.ExtractText();
+    Check(GardenCropData.CropIdByName(cherrySeedName+"\uC774")==catalog.SeedCrops[17546]
+        && GardenCropData.CropOfSeed(17546)==catalog.SeedCrops[17546],
+        "The actual game-data lookup identifies a planted cherry sapling with its Korean particle as the expected base crop");
     var potSheet=game.GetExcelSheet<Lumina.Excel.RawRow>(null,"custom/003/HouFurPlantPot_00331")!;
     var plotSheet=game.GetExcelSheet<Lumina.Excel.RawRow>(null,"custom/001/CmnDefHousingGardeningPlant_00151")!;
     var potRows=GardenTextData.Read(id=>potSheet.GetRow(id).ReadStringColumn(1).ExtractText(),19);
@@ -510,6 +517,7 @@ public class ConfigSaveProxy : System.Reflection.DispatchProxy
     protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args)
         => method!.Name switch {
             "SavePluginConfig" => null,
+            "Information" => null,
             "GetIpcSubscriber" => System.Reflection.DispatchProxy.Create(method.ReturnType,typeof(StockGateProxy)),
             _ => throw new NotSupportedException(method.Name)
         };

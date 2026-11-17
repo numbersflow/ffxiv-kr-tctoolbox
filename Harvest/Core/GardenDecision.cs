@@ -299,7 +299,7 @@ public static class GardenCropData
         }
     }
 
-    private static void EnsureBuilt()
+    private static void EnsureBuilt(Lumina.Excel.ExcelSheet<Item>? items = null, Lumina.Excel.ExcelSheet<GardeningSeed>? gardeningRows = null)
     {
         if (seedToCrop != null && cropNameToId != null) return;
 
@@ -308,9 +308,9 @@ public static class GardenCropData
 
         try
         {
-            var gardening = Svc.Data.GetExcelSheet<GardeningSeed>();
+            var gardening = gardeningRows ?? Svc.Data.GetExcelSheet<GardeningSeed>();
 
-            foreach (var item in Svc.Data.GetExcelSheet<Item>())
+            foreach (var item in items ?? Svc.Data.GetExcelSheet<Item>())
             {
                 if (item.ItemUICategory.RowId != GardeningUiCategory) continue;
                 if (item.FilterGroup != SeedFilterGroup) continue;
@@ -323,6 +323,9 @@ public static class GardenCropData
                 if (cropId == 0) continue;
 
                 seeds[item.RowId] = cropId;
+                // Indoor growth dialogue names the planted seed or sapling, before its flower color is known.
+                var seedName = item.Name.ExtractText();
+                if (!string.IsNullOrWhiteSpace(seedName)) names[seedName] = cropId;
 
                 var cropName = row.Value.Item.ValueNullable?.Name.ExtractText();
                 if (!string.IsNullOrWhiteSpace(cropName))

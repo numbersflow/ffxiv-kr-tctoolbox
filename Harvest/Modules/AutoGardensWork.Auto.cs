@@ -173,7 +173,8 @@ public sealed unsafe partial class AutoGardensWork
         foreach (var payload in seString.Payloads)
         {
             if (payload is not ItemPayload item || item.ItemId == 0) continue;
-            job.CropItemId = item.ItemId;
+            job.CropItemId = GardenCropData.CropOfSeed(item.ItemId);
+            if (job.CropItemId == 0) job.CropItemId = item.ItemId;
             break;
         }
 

@@ -473,6 +473,8 @@ public sealed unsafe partial class AutoGardensWork : TcModule
                 return true;
             }
 
+            if (!obj.IsTargetable || AutomationGate.TryGetBusyReason(out _)) return false;
+
             // 互動會叫出對話與選單，YesAlready 在它們出現的當下就按：先請它讓開，確認不了就不互動。
             if (!KeepTalkAndMenuExclusive()) return StopForYesAlready("對話或選單");
 
