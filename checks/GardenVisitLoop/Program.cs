@@ -181,7 +181,96 @@ foreach(var parent in run.Profile.Cells.Take(2))parent.Planted=budgetNow;
 Check(GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,71,budgetNow)
     && !GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,72,budgetNow),
     "Forecast reserves an hour for travel and timed work rather than filling the entire remaining growth time");
-run.Profile.Cells[0].State="mature";
+run.Profile.Cells.Single(c=>c.Id==run.Profile.Batch!.Cells[0]).State="mature";
 Check(!GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,1,budgetNow),
     "Observed early maturity overrides the base-duration estimate and closes the temporary planting window");
+run=Parallel();run.Profile.Cells[0].Tended=DateTime.UtcNow.AddHours(-13);
+run.StockUnavailable=true;run.BagUnavailable=true;
+Check(run.Start(careOnly:true),"Due care starts while procurement route and bag snapshots are unavailable");result=run.Run();
+Check(result.Result=="Succeeded" && run.Calls.Count(c=>c.Action=="Tend")==2 && run.Calls.All(c=>c.Action=="Tend"),
+    "Care-only work ignores empty planting plans and cannot be blocked by their procurement or inventory reads");
+run=Ordinary();run.StockUnavailable=true;run.Start();result=run.Run();
+Check(result.Result=="Succeeded" && run.Profile.Cells[0].Owned,"Prepared planting and its consumption receipt do not wait for GBR procurement route refreshes");
+run=Ordinary();run.BagUnavailable=true;run.Start();result=run.Tick();
+Check(result.Busy && run.Calls.Count==0,"A loading inventory waits before consuming a prepared seed");
+run.Pause(true);run.AgePausedWait(60);run.Pause(false);result=run.Tick();
+Check(result.Busy && run.Calls.Count==0,"Pause does not consume the inventory loading deadline");
+run.BagUnavailable=false;result=run.Run();
+Check(result.Result=="Succeeded" && run.Calls.Count(c=>c.Action=="Plant")==1,"Fresh bag data resumes the same owned planting once");
+run=Ordinary();run.BagUnavailable=true;run.Start();run.Tick();run.Cancel();result=run.Run();
+Check(result.Result=="Cancelled" && run.Calls.Count==0,"Timed cancellation during inventory loading starts no seed or foreign queue");
+run=Ordinary();run.BagUnavailable=true;run.Start();run.Tick();run.ExpireInventoryWait();result=run.Tick();
+Check(!result.Busy && result.Result=="Partial" && run.Calls.Count==0,"A permanently unavailable bag cannot hold the workflow indefinitely");
+run=Parallel();run.Profile.Cells[0].Tended=DateTime.UtcNow.AddHours(-13);run.Profile.Cells[2].Pending="Plant";
+run.StockUnavailable=true;run.BagUnavailable=true;run.Start(careOnly:true);result=run.Run();
+Check(result.Result=="Succeeded" && run.Profile.Cells[2].Pending=="Plant" && run.Calls.All(c=>c.Action=="Tend"),
+    "Care-only recovery leaves another pot's uncertain planting receipt untouched");
+VisitDriver Crossing(bool existing=false) {
+    var d=new VisitDriver();
+    d.Catalog.Crops[10]=new(10,11,"fast parent",false,24,[]);d.Catalog.Crops[20]=new(20,21,"long parent",false,96,[]);
+    d.Catalog.Crops[30]=new(30,31,"crossed seed crop",false,96,[]);d.Catalog.SeedCrops=new(){[11]=10,[21]=20,[31]=30};
+    d.Catalog.Crosses=[new(31,21,11)];d.UnavailableSeeds=[31];
+    var a=new GardenCell{Index=0,State="empty",Observed=DateTime.UtcNow};var b=new GardenCell{Index=1,State="empty",Observed=DateTime.UtcNow};
+    d.Profile.Cells=[a,b];d.Profile.Goals=[new(){Item=31,Quantity=1}];d.Inventory=new(){[11]=1,[21]=1,[7766]=2};
+    if(existing){
+        a.Seed=21;a.Crop=20;a.Owned=true;a.State="growing";a.Planted=DateTime.UtcNow.AddHours(-25);a.Tended=DateTime.UtcNow;
+        b.Seed=11;b.Crop=10;b.Owned=true;b.State="mature";b.Planted=DateTime.UtcNow.AddHours(-24);b.Tended=DateTime.UtcNow;
+        d.Profile.Batch=new(){Goal=31,Output=31,Cross=true,SeedA=21,SeedB=11,Required=1,Cells=[a.Id,b.Id]};
+        d.Rewards[2]=new(){[31]=1};
+    }
+    d.Initialize();return d;
+}
+run=Crossing();Check(run.Start(),"A fully prepared new crossing starts");result=run.Run();
+Check(result.Result=="Succeeded" && run.Calls.First(c=>c.Action=="Plant").Id==2 && run.Profile.Cells[1].Seed==21 && run.Profile.Cells[0].Seed==11,
+    "The long-lived anchor is planted first, then the fast producer is planted beside it for the first possible crossed seed");
+run=Crossing(existing:true);
+Check(run.Profile.Batch!.Cells[1]==run.Profile.Cells[0].Id,"An existing crossing retains the parent actually planted first");
+run.Start();result=run.Run();
+Check(run.Calls.Any(c=>c.Id==2&&c.Action=="Harvest") && !run.Calls.Any(c=>c.Id==1&&c.Action=="Harvest") && run.Inventory[31]==1,
+    "The later-planted fast parent is harvested as soon as ready instead of waiting for the uncrossed first parent's long maturity");
+run=Ordinary();run.Start();while(!run.Calls.Any(c=>c.Action=="Plant"))run.Tick();run.BagUnavailable=true;result=run.Run();
+var confirmedPlantTime=run.Profile.Cells[0].Planted;
+Check(run.Profile.Cells[0].Owned && run.Profile.Cells[0].Pending=="Plant","A verified crop with an unavailable consumption receipt keeps its recovery record");
+run.BagUnavailable=false;run.Profile.Cells[0].RetryAt=DateTime.MinValue;run.Start();run.Run();
+Check(run.Profile.Cells[0].Planted==confirmedPlantTime && run.Calls.Count(c=>c.Action=="Plant")==1,
+    "Recovering a consumption receipt preserves the already confirmed planting time and never resends the seed");
+run=TimeCapacity();var producerCell=run.Profile.Cells.Single(c=>c.Id==run.Profile.Batch!.Cells[0]);var anchorCell=run.Profile.Cells.Single(c=>c.Id==run.Profile.Batch!.Cells[1]);
+anchorCell.State="mature";producerCell.Planted=DateTime.UtcNow;
+Check(GardenPolicy.FitsGrowthWindow(run.Profile.Batch!,run.Profile.Cells,run.Catalog.Crops,run.Catalog.SeedCrops,24,DateTime.UtcNow),
+    "A retained mature anchor does not close the fast producer's next growth window");
+run=Crossing(existing:true);run.Profile.Goals[0].Item=30;run.Profile.Batch!.Goal=30;run.Inventory[16026]=1;run.Initialize();
+run.Start();result=run.Run();
+Check(result.Result=="Succeeded" && run.Profile.ActiveBatches.Count()==2 && run.Profile.Cells[0].Owned && run.Profile.Cells[1].Owned
+    && run.Profile.Cells[1].Seed==31 && run.Profile.ActiveBatches.SelectMany(b=>b.Cells).Distinct().Count()==2,
+    "A produced ancestor seed starts the next growing stage before the retained long parent matures, without sharing cell ownership");
+run=Ordinary(2,ripe:true);run.Profile.Cells[0].Group="outdoor";
+run.Catalog.Crops[200]=new(200,201,"indoor flower",true,24,[]);run.Catalog.SeedCrops[201]=200;
+var indoorReady=new GardenCell{Group="indoor",Index=1,Kind="pot",Seed=201,Crop=200,Owned=true,State="mature",Observed=DateTime.UtcNow,Planted=DateTime.UtcNow.AddDays(-2),Tended=DateTime.UtcNow};
+run.Profile.Cells.Add(indoorReady);run.Profile.Goals.Add(new(){Item=200,Quantity=2});
+run.Profile.AdditionalBatches.Add(new(){Goal=200,Output=200,Required=2,SeedA=201,Cells=[indoorReady.Id]});run.Inventory[201]=2;run.Initialize();
+run.Start();result=run.Run();
+Check(result.Result=="Succeeded" && run.Teleports==2 && run.Calls.FindIndex(c=>c.Id==1&&c.Action=="Plant")<run.Calls.FindIndex(c=>c.Id==2&&c.Action=="Harvest"),
+    "A prepared outdoor replant finishes before travelling indoors, so two facilities need two arrivals rather than four");
+run=Ordinary(2);run.Profile.Cells.Add(new(){Index=1,State="empty",Observed=DateTime.UtcNow});run.Initialize();
+Check(run.Profile.Batch!.Cells.Count==2 && run.Supplies[101]==2,"An existing incomplete crop goal expands into a newly available plot instead of leaving it idle");
+run.Start();result=run.Run();
+Check(result.Result=="Succeeded" && run.Calls.Count(c=>c.Action=="Plant")==2,"Expanded reservations are planted in the same owned visit");
+run=new();run.Catalog.Crops[100]=new(100,101,"food",false,24,[]);run.Catalog.Crops[200]=new(200,201,"flower",true,24,[]);
+run.Catalog.SeedCrops=new(){[101]=100,[201]=200};run.Profile.Cells=Enumerable.Range(0,4).Select(i=>new GardenCell{Index=i,Kind=i==3?"pot":"plot",State="empty",Observed=DateTime.UtcNow}).ToList();
+run.Profile.Goals=[new(){Item=100,Quantity=4},new(){Item=200,Quantity=1}];run.Inventory=new(){[101]=4,[201]=1,[16026]=4};run.Initialize();
+Check(run.Profile.ActiveBatches.Count()==2 && run.Profile.BatchFor(run.Profile.Cells[3])?.Goal==200,
+    "Ordinary food cannot occupy the only indoor pot while a selected flower goal needs it");
+run=Ordinary(2);run.Profile.Cells.AddRange(new GardenCell[]{new(){Index=1,State="empty"},new(){Index=2,State="empty"}});
+run.Profile.Cells[0].Enabled=false;run.Initialize();
+Check(run.Profile.Batch!.Cells.Count==2 && !run.Profile.Batch.Cells.Contains(run.Profile.Cells[0].Id),
+    "A disabled empty reservation is released so enabled free plots can meet the target");
+run=Crossing(existing:true);var oldFast=run.Profile.Cells[0];var oldLong=run.Profile.Cells[1];
+oldFast.Seed=11;oldFast.Crop=10;oldFast.State="mature";oldLong.Seed=21;oldLong.Crop=20;oldLong.State="growing";
+run.Profile.Batch!.SeedA=11;run.Profile.Batch.SeedB=21;run.Patches.Clear();run.Initialize();run.Start();result=run.Run();
+Check(run.Profile.Batch!.Cells[1]==oldLong.Id && run.Calls.Any(c=>c.Id==1&&c.Action=="Harvest") && run.Calls.Any(c=>c.Id==1&&c.Action=="Plant")
+    && run.Calls.All(c=>c.Id!=2||c.Action!="Harvest"),
+    "A legacy fast parent planted first is harvested and reused beside the long parent instead of being held for the long parent's full duration");
+run=Ordinary();run.Start();run.Patches[1]=(Harvest.Core.PatchState.Ripe,999);run.Run();
+run.Profile.Cells.Add(new(){Index=1,State="empty",Observed=DateTime.UtcNow});run.Initialize();run.Start();result=run.Run();
+Check(run.Profile.Cells[1].Owned && run.Calls.All(c=>c.Id!=1),"A foreign crop releases only its unusable reservation so another empty plot can continue the same target");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

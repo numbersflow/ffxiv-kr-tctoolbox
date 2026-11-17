@@ -27,7 +27,7 @@ internal sealed partial class HarvestService : IDisposable
     private readonly ConcurrentDictionary<uint, string> gardenScopes = new();
     private volatile int requestedGardenExpansion = 6;
     private string gardenView = "{\"Available\":false}";
-    private bool stockKnown;
+    private bool stockKnown, inventoryChecked;
     private readonly GardenBookCache bookCache = new();
     private readonly Dictionary<uint, GardenBookCache> scopedBookCaches = [];
     private Dictionary<uint, int>? selectedBookNeeds;
@@ -73,6 +73,8 @@ internal sealed partial class HarvestService : IDisposable
     private bool CanVisit(GardenCell cell) => Profile.BatchFor(cell) is { } batch
         && (cell.Owned || cell.Pending.Length > 0 || CanPlant(cell))
         && GardenPolicy.CanVisit(cell, stock, SoilFor(cell), GardenPolicy.PlantingReady(batch, Profile.Cells, stock, SoilFor(cell), BatchMaterials(batch)));
+
+    private Func<uint[], Dictionary<uint, int>?> inventoryReader = ReadBagCounts;
 
     public HarvestService(Configuration config, AutoGardensWork garden)
     {
@@ -128,7 +130,7 @@ internal sealed partial class HarvestService : IDisposable
             return;
         }
         var current = Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0;
-        if (current != owner) { owner = current; stock.Clear(); bookCache.Reset(); scopedBookCaches.Clear(); selectedBookNeeds = null; supplies.Clear(); gardenScopes.Clear(); soilVentureSnapshot = "{\"Available\":false}"; gardenView = "{\"Available\":false}"; }
+        if (current != owner) { owner = current; inventoryChecked = false; stock.Clear(); bookCache.Reset(); scopedBookCaches.Clear(); selectedBookNeeds = null; supplies.Clear(); gardenScopes.Clear(); soilVentureSnapshot = "{\"Available\":false}"; gardenView = "{\"Available\":false}"; }
         stockKnown = false;
         if (owner == 0) { displayProfile = null; snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"접속 대기\"}"; return; }
         while (pendingConfiguration.TryDequeue(out var change)) Configure(change);
@@ -153,6 +155,11 @@ internal sealed partial class HarvestService : IDisposable
                 r => new Stock(r.GetProperty("Inventory").GetInt32(), r.GetProperty("Retainer").GetInt32(), r.GetProperty("CanProcure").GetBoolean(),
                     !r.TryGetProperty("CanProcureNow", out var due) || due.GetBoolean()));
             if (GardenPolicy.InvalidateHarvestedCells(Profile.Cells, previousStock, stock)) config.Save();
+            if (!inventoryChecked) {
+                var previousBag = stock.ToDictionary(p => p.Key, p => p.Value.Inventory);
+                ReadVisitInventory(ids); inventoryChecked = true;
+                Svc.Log.Information($"Garden native inventory checked: rows={ids.Length}, differences={stock.Count(p => p.Value.Inventory != previousBag[p.Key])}");
+            }
             stockKnown = true;
             if (Profile.BookItems.Count > 0 && !bookReady) {
                 if (bookUpdating) throw new GardenBookPendingException();
@@ -256,10 +263,11 @@ internal sealed partial class HarvestService : IDisposable
         foreach (var id in targets.Keys.ToArray()) if (stock.GetValueOrDefault(id)?.Total >= targets[id]) targets.Remove(id);
         var retained = new List<GardenBatch>();
         foreach (var batch in Profile.ActiveBatches) {
+            dirty |= GardenPolicy.AlignCrossAnchor(batch, Profile.Cells, catalog!.Crops, catalog.SeedCrops);
             if (!batch.Cross && targets.TryGetValue(batch.Goal, out var required))
                 dirty |= GardenPolicy.LimitOrdinaryBatch(batch, Profile.Cells, required, stock.GetValueOrDefault(batch.Output)?.Total ?? 0, catalog!.Crops.GetValueOrDefault(batch.Output)?.Yield ?? 1);
             if (!batch.Cross) {
-                var remaining = Profile.Cells.Where(c => batch.Cells.Contains(c.Id) && (c.Owned || c.Pending.Length > 0 || CanPlant(c))).Select(c => c.Id).ToList();
+                var remaining = Profile.Cells.Where(c => batch.Cells.Contains(c.Id) && (c.Owned || c.Pending.Length > 0 || c.Enabled && (c.Crop == 0 || c.Observed == DateTime.MinValue) && CanPlant(c))).Select(c => c.Id).ToList();
                 dirty |= !batch.Cells.SequenceEqual(remaining); batch.Cells = remaining;
                 if (remaining.Count == 0) continue;
             }
@@ -270,18 +278,25 @@ internal sealed partial class HarvestService : IDisposable
             batch.Clearing |= cells.Any(c => !c.Owned && c.State == "empty"
                 && stock.TryGetValue(c.Seed, out var seedStock) && seedStock.Total == 0 && !seedStock.CanProcure);
             dirty |= clearing != batch.Clearing;
+            if (batch.Clearing) {
+                var occupied = cells.Where(c => c.Owned || c.Pending.Length > 0).ToArray();
+                dirty |= occupied.Length != batch.Cells.Count;
+                batch.Cells = occupied.Select(c => c.Id).ToList(); cells = occupied;
+            }
             if (batch.Clearing && cells.All(c => !c.Owned && c.Pending.Length == 0 && c.State is "empty" or "unscanned")) dirty = true;
             else retained.Add(batch);
         }
         Profile.SetBatches(retained);
         var reserved = retained.SelectMany(b => b.Cells).ToHashSet();
-        bool Available(GardenCell cell, bool crossing, double hours = 0) => cell.Enabled && !cell.Owned && cell.Pending.Length == 0 && !reserved.Contains(cell.Id)
-            && (cell.Kind != "plot" || !retained.Where(b => crossing || b.Cross)
+        var flowerDemand = targets.Keys.Any(id => catalog!.Crops.GetValueOrDefault(id)?.Flower == true);
+        bool Available(GardenCell cell, bool crossing, double hours = 0) => cell.Enabled && !cell.Owned && cell.Pending.Length == 0 && (cell.Crop == 0 || cell.Observed == DateTime.MinValue) && !reserved.Contains(cell.Id)
+            && (cell.Kind != "plot" || !retained.Where(b => crossing || b.Cross && !b.Clearing)
                 .Any(b => (crossing || !GardenPolicy.FitsGrowthWindow(b, Profile.Cells, catalog!.Crops, catalog.SeedCrops, hours, DateTime.UtcNow))
                     && b.Cells.Any(id => Profile.Cells.Any(c => c.Id == id && GardenPolicy.AdjacentSlots(cell, c, Profile.Cells)))));
 
         foreach (var (item, quantity) in targets) {
-            if (retained.Any(b => b.Goal == item)) continue;
+            var growing = retained.FirstOrDefault(b => b.Goal == item && !b.Clearing);
+            if (growing?.Cross == true) continue;
             var isSeed = catalog!.SeedCrops.ContainsKey(item);
             if (!isSeed && !catalog.Crops.ContainsKey(item)) continue;
             var product = isSeed ? null : catalog.Crops[item];
@@ -293,7 +308,7 @@ internal sealed partial class HarvestService : IDisposable
             GardenCell[] selected;
             GardenBatch next;
             if (stage != null) {
-                if (retained.Any(b => b.Output == stage.Output)) continue;
+                if (retained.Any(b => b.Output == stage.Output && !b.Clearing)) continue;
                 selected = Profile.Cells.Where(c => c.Kind == "plot" && Available(c, true))
                     .GroupBy(c => (c.Group, c.House, c.World, c.Territory, c.X, c.Y, c.Z)).SelectMany(g => g.SelectMany(a => g.Where(b => (a.Index + 1) % 8 == b.Index)
                         .Select(b => new[] { a, b }))).FirstOrDefault() ?? [];
@@ -303,24 +318,33 @@ internal sealed partial class HarvestService : IDisposable
                 }
                 next = new() { Goal = item, Output = stage.Output, Required = stage.Required,
                     SeedA = stage.A, SeedB = stage.B, Cross = true, Cells = selected.Select(c => c.Id).ToList() };
+                var aHours = catalog.Crops.GetValueOrDefault(catalog.SeedCrops.GetValueOrDefault(stage.A))?.Hours ?? 0;
+                var bHours = catalog.Crops.GetValueOrDefault(catalog.SeedCrops.GetValueOrDefault(stage.B))?.Hours ?? 0;
+                if (aHours > 0 && bHours > 0 && aHours > bHours) (next.SeedA, next.SeedB) = (next.SeedB, next.SeedA);
             } else if (isSeed) {
                 foreach (var (id, amount) in plan.Supplies) supplies[id] = Math.Max(supplies.GetValueOrDefault(id), amount);
                 continue;
             }
             else {
-                selected = Profile.Cells.Where(c => Available(c, false, product!.Hours) && (!product.Flower || c.Kind == "pot"))
-                    .OrderBy(c => c.Kind == "pot" ? 0 : 1).Take(Math.Min(GardenPolicy.PlantingCells(quantity, stock.GetValueOrDefault(item)?.Total ?? 0, product!.Yield),
-                        stock.GetValueOrDefault(seed) is { CanProcure: false } held ? Math.Min(24, held.Total) : 24)).ToArray();
+                var slots = GardenPolicy.PlantingCells(quantity, stock.GetValueOrDefault(item)?.Total ?? 0, product!.Yield)
+                    - Profile.Cells.Count(c => c.Enabled && growing?.Cells.Contains(c.Id) == true);
+                if (slots <= 0) continue;
+                var seeds = stock.GetValueOrDefault(seed) is { CanProcure: false } held
+                    ? Math.Max(0, held.Total - Profile.Cells.Count(c => reserved.Contains(c.Id) && !c.Owned && c.Pending.Length == 0 && c.Seed == seed)) : 24;
+                selected = Profile.Cells.Where(c => Available(c, false, product.Hours) && (product.Flower ? c.Kind == "pot" : c.Kind != "pot" || !flowerDemand))
+                    .OrderBy(c => c.Kind == "pot" ? 0 : 1).Take(Math.Min(slots, seeds)).ToArray();
                 if (selected.Length == 0) {
                     if (!Profile.Cells.Any(c => c.Enabled && (!product!.Flower || c.Kind == "pot")))
                         error = product!.Flower ? "꽃을 재배할 실내 화분 칸을 등록·선택해야 합니다." : "재배할 칸을 등록·선택해야 합니다.";
                     continue;
                 }
-                next = new() { Goal = item, Output = item, Required = quantity, SeedA = seed, Cells = selected.Select(c => c.Id).ToList() };
+                next = growing ?? new() { Goal = item, Output = item, Required = quantity, SeedA = seed, Cells = [] };
+                next.Cells.AddRange(selected.Select(c => c.Id));
             }
             for (var i = 0; i < selected.Length; i++) selected[i].Seed = i % 2 == 1 && next.Cross ? next.SeedB : next.SeedA;
             error = "";
-            retained.Add(next); reserved.UnionWith(next.Cells);
+            if (!retained.Contains(next)) retained.Add(next);
+            reserved.UnionWith(next.Cells);
             Profile.SetBatches(retained); dirty = true;
         }
         foreach (var batch in Profile.ActiveBatches) ReserveBatch(batch);

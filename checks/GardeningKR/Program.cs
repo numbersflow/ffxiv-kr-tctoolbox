@@ -493,6 +493,7 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
         var inventory=new Dictionary<uint,Stock>{[13768]=new(0,0,true),[7766]=new(0,0,true)};
         Set("owner",10ul);Set("config",new Configuration{Profiles=new(){[10]=visitProfile}});Set("catalog",catalog);Set("stock",inventory);
         StockGateProxy.Items=new(){[13768]=1,[7766]=0};
+        Set("inventoryReader",(Func<uint[],Dictionary<uint,int>?>)(ids=>ids.ToDictionary(id=>id,id=>StockGateProxy.Items.GetValueOrDefault(id))));
         typeof(HarvestService).GetMethod("ReadVisitInventory",flags)!.Invoke(service,[new uint[]{13768,7766}]);
         Check(inventory[13768].Inventory==1,"Actual visit refresh discovers a newly withdrawn second parent instead of skipping it from stale stock");
         var visitType=typeof(HarvestService).GetNestedType("Visit",System.Reflection.BindingFlags.NonPublic)!;

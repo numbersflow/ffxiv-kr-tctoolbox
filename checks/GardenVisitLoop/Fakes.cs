@@ -57,6 +57,7 @@ namespace Harvest.Planning {
         internal bool HasFunction=>true;internal bool HasAction=>true;
         internal T InvokeFunc(params object[] args) {
             if(name=="Lifestream.IsWorkflowPaused")return (T)(object)false;
+            if(VisitDriver.Current.StockUnavailable)return (T)(object)JsonSerializer.Serialize(new{Available=false,Pending=true});
             var ids=JsonSerializer.Deserialize<uint[]>((string)args[0])!;
             return (T)(object)JsonSerializer.Serialize(new{Available=true,Character=10ul,Rows=ids.Select(id=>new{ItemId=id,Inventory=VisitDriver.Current.Inventory.GetValueOrDefault(id)}).ToArray()});
         }
@@ -81,12 +82,13 @@ namespace Harvest.Planning {
         private readonly Configuration config=new();private readonly Harvest.Modules.AutoGardensWork garden=new();
         public Catalog Catalog=new();private Catalog catalog=>Catalog;
         public HarvestProfile Profile=new();private readonly ulong owner=10;
-        public Dictionary<uint,int> Inventory=[];
+        public Dictionary<uint,int> Inventory=[];public HashSet<uint> UnavailableSeeds=[];
         public Dictionary<ulong,(PatchState State,uint Crop)> Patches=[];
         public Dictionary<ulong,(PatchState State,uint Crop,DateTime At)> Seen=[];
         public Dictionary<ulong,Dictionary<uint,int>> Rewards=[];
         public List<(ulong Id,string Action)> Calls=[];
-        public int Teleports,Free=200;public bool FailTendReceipt;
+        private string currentLocation="";
+        public int Teleports,Free=200;public bool FailTendReceipt,StockUnavailable,BagUnavailable;
         private Dictionary<uint,Stock> stock=[];private Dictionary<uint,int> books=[],supplies=[];
         private Visit? visit;private DateTime nextRefresh;private string error="",snapshot="";
         private class Recording {internal bool Active;}
@@ -97,26 +99,29 @@ namespace Harvest.Planning {
         public VisitDriver(){Current=this;Svc.PlayerState.ContentId=10;}
         public void Initialize() {
             stock=Catalog.Crops.Keys.Concat(Catalog.SeedCrops.Keys).Concat(Inventory.Keys).Append(16026u).Append(7766u).Distinct()
-                .ToDictionary(id=>id,id=>new Stock(Inventory.GetValueOrDefault(id),0,Catalog.SeedCrops.ContainsKey(id)));
+                .ToDictionary(id=>id,id=>new Stock(Inventory.GetValueOrDefault(id),0,Catalog.SeedCrops.ContainsKey(id)&&!UnavailableSeeds.Contains(id)));
             foreach(var c in Profile.Cells){c.LayoutInstanceKey=1;c.LayoutSubId=(uint)c.Index;var id=(ulong)c.Index+1;
                 Patches.TryAdd(id,(c.Owned?c.State=="mature"?PatchState.Ripe:PatchState.Growing:PatchState.Empty,c.Crop));}
             Replan();
         }
         public bool Ready()=>Profile.ActiveBatches.Any() && HasDueVisit() && Profile.Cells.Any(c=>Profile.BatchFor(c)!=null&&c.Enabled&&Due(c)&&ReadyForVisit(c));
-        public bool Start(bool careOnly=false){using var args=JsonDocument.Parse(JsonSerializer.Serialize(new{CareOnly=careOnly}));work=CreateWork("Gardening",args.RootElement);return work.Start();}
+        public bool Start(bool careOnly=false){currentLocation="";using var args=JsonDocument.Parse(JsonSerializer.Serialize(new{CareOnly=careOnly}));work=CreateWork("Gardening",args.RootElement);return work.Start();}
         public LocalAutomation.AutomationObservation Tick()=>work.Observe();
         public LocalAutomation.AutomationObservation Run(){for(int i=0;i<300;i++){var r=Tick();if(!r.Busy)return r;}throw new Exception("Visit did not settle: "+error);}
         public void ChangeCharacter(ulong id)=>Svc.PlayerState.ContentId=id;
         public void Disconnect()=>work.Disconnect!();
+        public void AgePausedWait(double seconds){visit!.PauseAt=visit.PauseAt.AddSeconds(-seconds);visit.StockWaitAt=visit.StockWaitAt.AddSeconds(-seconds);visit.StepAt=visit.StepAt.AddSeconds(-seconds);}
+        public void ExpireInventoryWait()=>visit!.StockWaitAt=DateTime.UtcNow.AddSeconds(-31);
         public void Cancel()=>work.Stop();public void Pause(bool paused)=>work.Pause!(paused,false);
         public bool GardenBusy {get=>garden.IsBusy;set=>garden.IsBusy=value;}
         public Dictionary<uint,int> Supplies=>supplies;
         public string Error=>error;
         public bool CachedReady=>JsonDocument.Parse(snapshot).RootElement.GetProperty("Ready").GetBoolean();
+        private static Dictionary<uint,int>? ReadBagCounts(uint[] ids)=>Current.BagUnavailable?null:ids.ToDictionary(id=>id,id=>Current.Inventory.GetValueOrDefault(id));
         private static int FreeSlots()=>Current.Free;
         private int HarvestSlots(GardenCell cell)=>1;
         private static bool AtCell(GardenCell cell)=>true;
         private GardenPatch[] NearbyPatches()=>Profile.Cells.Select(c=>new GardenPatch((ulong)c.Index+1,c.Kind,1,(uint)c.Index,c.Position,c.Position)).ToArray();
-        private bool WalkingRouteInProgress(Visit run,GardenCell cell,out string phase){phase="teleport";if(run.HomeArrivals.Add(cell.Group)){Teleports++;return true;}return false;}
+        private bool WalkingRouteInProgress(Visit run,GardenCell cell,out string phase){phase="teleport";var location=VisitLocation(cell);if(currentLocation!=location){Teleports++;currentLocation=location;return true;}return false;}
     }
 }

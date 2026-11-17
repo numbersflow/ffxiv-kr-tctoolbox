@@ -37,15 +37,32 @@ public static class GardenPolicy
         return distance <= 1 || distance == indices.Count - 1;
     }
 
+    public static bool AlignCrossAnchor(GardenBatch batch, IEnumerable<GardenCell> cells, IReadOnlyDictionary<uint, Crop> crops, IReadOnlyDictionary<uint, uint> seeds)
+    {
+        if (!batch.Cross || batch.Clearing || batch.Cells.Count != 2) return false;
+        var parents = cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
+        if (parents.Length != 2 || parents.Any(c => !c.Owned || c.Pending.Length > 0 || c.Planted == DateTime.MinValue)) return false;
+        var aHours = crops.GetValueOrDefault(seeds.GetValueOrDefault(parents[0].Seed))?.Hours ?? 0;
+        var bHours = crops.GetValueOrDefault(seeds.GetValueOrDefault(parents[1].Seed))?.Hours ?? 0;
+        var timed = double.IsFinite(aHours) && double.IsFinite(bHours) && aHours > 0 && bHours > 0 && aHours != bHours;
+        if (!timed && parents[0].Planted == parents[1].Planted) return false;
+        var anchor = timed ? (aHours > bHours ? parents[0] : parents[1]) : parents.OrderBy(c => c.Planted).First();
+        if (batch.Cells[1] == anchor.Id) return false;
+        batch.Cells = [parents.Single(c => c.Id != anchor.Id).Id, anchor.Id];
+        return true;
+    }
+
     public static bool FitsGrowthWindow(GardenBatch crossing, IEnumerable<GardenCell> cells,
         IReadOnlyDictionary<uint, Crop> crops, IReadOnlyDictionary<uint, uint> seeds, double hours, DateTime now)
     {
         if (!crossing.Cross || crossing.Clearing || !double.IsFinite(hours) || hours <= 0) return false;
         var parents = cells.Where(c => crossing.Cells.Contains(c.Id)).ToArray();
         if (parents.Length != crossing.Cells.Count || parents.Length < 2 || parents.Any(c => !c.Owned || c.Pending.Length > 0
-            || c.State != "growing" || c.Observed == DateTime.MinValue || c.Error.Length > 0 || c.Planted == DateTime.MinValue || c.Planted > now
+            || c.State is not ("growing" or "mature") || c.Observed == DateTime.MinValue || c.Error.Length > 0 || c.Planted == DateTime.MinValue || c.Planted > now
             || !seeds.TryGetValue(c.Seed, out var item) || !crops.TryGetValue(item, out var crop) || !double.IsFinite(crop.Hours) || crop.Hours <= 0)) return false;
-        var remaining = parents.Min(c => crops[seeds[c.Seed]].Hours - (now - c.Planted).TotalHours);
+        var producer = parents.Single(c => c.Id == crossing.Cells[0]);
+        if (producer.State != "growing") return false;
+        var remaining = crops[seeds[producer.Seed]].Hours - (now - producer.Planted).TotalHours;
         // Leave an hour for travel and timed work; actual occupied neighbors still block cross planting if late.
         return remaining >= hours + 1;
     }
@@ -61,7 +78,7 @@ public static class GardenPolicy
         if (batch == null || batch.Clearing) return false;
         if (batch.Cross) return CrossPlantingClear(batch, cell, profile.Cells);
         var hours = crops.GetValueOrDefault(batch.Output)?.Hours ?? 0;
-        return !profile.ActiveBatches.Any(cross => cross.Cross
+        return !profile.ActiveBatches.Any(cross => cross.Cross && !cross.Clearing
             && cross.Cells.Any(id => profile.Cells.Any(parent => parent.Id == id && AdjacentSlots(cell, parent, profile.Cells)))
             && !FitsGrowthWindow(cross, profile.Cells, crops, seeds, hours, now));
     }
@@ -77,8 +94,8 @@ public static class GardenPolicy
         if (batch.Cross) return false;
         var selected = cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
         var started = selected.Where(c => c.Owned || c.Pending.Length > 0).ToArray();
-        var remaining = Math.Max(0, PlantingCells(required, owned, yield) - started.Length);
-        var ids = started.Concat(selected.Except(started).Take(remaining)).Select(c => c.Id).ToList();
+        var remaining = Math.Max(0, PlantingCells(required, owned, yield) - started.Count(c => c.Enabled));
+        var ids = started.Concat(selected.Except(started).Where(c => c.Enabled).Take(remaining)).Select(c => c.Id).ToList();
         var changed = batch.Required != required || !batch.Cells.SequenceEqual(ids);
         batch.Required = required; batch.Cells = ids;
         return changed;
