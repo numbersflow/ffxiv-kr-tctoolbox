@@ -274,6 +274,7 @@ internal sealed partial class HarvestService : IDisposable
             var clearing = batch.Clearing;
             batch.Clearing |= !targets.ContainsKey(batch.Goal) || stock.GetValueOrDefault(batch.Output)?.Total >= batch.Required;
             var cells = Profile.Cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
+            batch.Clearing |= batch.Cross && (cells.Length != batch.Cells.Count || cells.Any(c => !c.Enabled));
             // Rebuild the ancestor stage after an irreplaceable parent seed is exhausted.
             batch.Clearing |= cells.Any(c => !c.Owned && c.State == "empty"
                 && stock.TryGetValue(c.Seed, out var seedStock) && seedStock.Total == 0 && !seedStock.CanProcure);

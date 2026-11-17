@@ -77,7 +77,9 @@ public sealed class HarvestProfile
         bool SameHouse(GardenCell c) => c.World == first.World && c.Territory == first.Territory && c.House == first.House;
         var legacy = Cells.Where(c => SameHouse(c) && c.LayoutInstanceKey == 0 && c.Kind == first.Kind
             && Vector3.DistanceSquared(c.Position, first.Position) < (first.Kind == "pot" ? 0.01f * 0.01f : 0.1f * 0.1f)).ToArray();
-        if (legacy.Any(c => c.Owned || c.Pending.Length > 0))
+        if (legacy.Any(c => c.Owned || c.Pending.Length > 0)
+            || ActiveBatches.Any(b => legacy.Any(c => b.Cells.Contains(c.Id))
+                && Cells.Any(c => b.Cells.Contains(c.Id) && (c.Owned || c.Pending.Length > 0))))
             throw new InvalidOperationException("기존 칸의 진행 중 재배 기록을 확인해야 합니다. 자동 등록으로 덮어쓰지 않습니다.");
         var previous = Cells;
         var previousBatches = ActiveBatches.ToArray();

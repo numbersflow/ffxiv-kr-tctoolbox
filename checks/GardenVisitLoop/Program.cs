@@ -273,4 +273,13 @@ Check(run.Profile.Batch!.Cells[1]==oldLong.Id && run.Calls.Any(c=>c.Id==1&&c.Act
 run=Ordinary();run.Start();run.Patches[1]=(Harvest.Core.PatchState.Ripe,999);run.Run();
 run.Profile.Cells.Add(new(){Index=1,State="empty",Observed=DateTime.UtcNow});run.Initialize();run.Start();result=run.Run();
 Check(run.Profile.Cells[1].Owned && run.Calls.All(c=>c.Id!=1),"A foreign crop releases only its unusable reservation so another empty plot can continue the same target");
+run=Crossing(existing:true);run.Profile.Cells.RemoveAt(0);run.Initialize();
+Check(run.Profile.ActiveBatches.All(b=>b.Cells.All(id=>run.Profile.Cells.Any(c=>c.Id==id))) && run.Profile.Batch!.Clearing && run.Ready(),
+    "Removing a crossing parent retires only that stage and releases the remaining ripe parent's verified harvest");
+run.Start();result=run.Run();
+Check(result.Result=="Succeeded" && run.Inventory[31]==1 && run.Calls.All(c=>c.Id!=1),
+    "An unregistered parent is never touched while its remaining crossed crop can complete the target");
+run=Crossing(existing:true);run.Profile.Cells[0].Enabled=false;run.Initialize();run.Start();result=run.Run();
+Check(result.Result=="Succeeded" && run.Profile.Cells[0].Owned && run.Calls.All(c=>c.Id!=1) && !run.Ready(),
+    "Disabling a parent preserves its crop record and cannot leave a perpetual actionable crossing or block the other parent's harvest");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

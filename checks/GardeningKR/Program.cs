@@ -141,6 +141,12 @@ Check(autoProfile.RegisterPatches(recreatedCells,()=>{})==0 && autoProfile.Cells
     stop.Invoke(service,new object[]{work,true});
     Check(arrivals.Count==0 && walked.Count==0 && failed.Count==0,"Cancellation and pause invalidate the route so the next visit starts with a fresh home teleport");
 }
+var ambiguousLegacy=new GardenCell{Group="legacy",World=1,Territory=2,House=3,X=origin.X,Y=origin.Y,Z=origin.Z};
+var liveSibling=new GardenCell{Group="legacy",World=1,Territory=2,House=3,X=origin.X,Y=origin.Y,Z=origin.Z,LayoutInstanceKey=1,LayoutSubId=999,Owned=true,Seed=123};
+var mixedLegacy=new HarvestProfile{Cells=[ambiguousLegacy,liveSibling],Batch=new(){Cross=true,Cells=[ambiguousLegacy.Id,liveSibling.Id]}};
+try{mixedLegacy.RegisterPatches(autoCells,()=>{});throw new Exception("An active sibling lost its batch through legacy registration.");}
+catch(InvalidOperationException){Check(mixedLegacy.Cells.Count==2 && mixedLegacy.Batch!.Cells.Contains(liveSibling.Id) && liveSibling.Owned,
+    "Bulk registration cannot orphan a planted sibling when replacing an ambiguous unused legacy cell");}
 var rollbackProfile = new HarvestProfile();
 try { rollbackProfile.RegisterPatches(autoCells,()=>throw new IOException("save failed")); throw new Exception("Failed bulk save accepted."); }
 catch(IOException) { Check(rollbackProfile.Cells.Count==0, "Bulk registration rolls back every new slot on persistence failure."); }
