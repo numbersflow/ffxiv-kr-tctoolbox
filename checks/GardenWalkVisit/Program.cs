@@ -9,6 +9,7 @@ var route=new GardenWalkRoute {Group="밭",Travel="home",Start=new(1,2,1,3),Dest
 var service=new HarvestService(route);
 Svc.Objects.LocalPlayer.Position=Vector3.Zero;
 Check(service.Run(cell) && Svc.PluginInterface.Travel=="home" && Svc.PluginInterface.Moves==0,"A visit must teleport even when already at the saved house arrival point.");
+Check(Svc.PluginInterface.TravelMode==0,"Recorded outdoor route must explicitly request teleport-only mode even when Lifestream is configured to enter the house.");
 service.TeleportFinished();
 Check(service.Run(cell),"A recorded ground route starts from its saved arrival context.");
 Check(Svc.PluginInterface.Moves==1 && Svc.PluginInterface.IgnoreY==true,"Recorded stairs must use Lifestream ground movement; false selects flying behavior and freezes uphill walking.");
@@ -18,6 +19,7 @@ Check(service.Run(cell) && Svc.PluginInterface.Moves==1,"A running owned path is
 Svc.PluginInterface.Busy=false; Svc.Objects.LocalPlayer.Position=new(2,1,2);
 Check(!service.Run(cell) && service.Finished,"Endpoint arrival and housing identity release the path for cell interaction.");
 Check(!service.Run(cell) && Svc.PluginInterface.Moves==1,"The same route is not replayed for each remaining cell in a visit.");
+Check(Svc.PluginInterface.HomeRequests==1,"Remaining cells in one visit must not request another home teleport.");
 service=new(route); Svc.Objects.LocalPlayer.Position=new(20,0,20);
 Check(service.Run(cell) && Svc.PluginInterface.Travel=="home","An off-route start uses the configured Lifestream arrival command.");
 service.TeleportFinished();
@@ -25,4 +27,8 @@ try { service.Run(cell); throw new Exception("An invalid teleport destination mu
 catch(InvalidOperationException) {checks++;}
 service=new(route); Svc.Objects.LocalPlayer.Position=new(2,1,2); Svc.PluginInterface.Travel="";
 Check(service.Run(cell) && Svc.PluginInterface.Travel=="home","A new visit must teleport even when already standing beside the garden.");
+service=new(route);Svc.PluginInterface.HouseOverride=1;Svc.PluginInterface.TravelMode=null;
+Check(service.Run(cell) && Svc.PluginInterface.TravelMode==0,"A walk-to-door override must also be bypassed because the saved path starts at the teleport spawn.");
+service=new(route);service.RemoveRoute();Svc.PluginInterface.HouseOverride=2;
+Check(service.Run(cell) && Svc.PluginInterface.TravelMode==2,"Visits without a recorded outdoor walk retain the existing home-entry command for indoor pots.");
 Console.WriteLine($"PASS {checks} actual garden walk visit checks; no native game actions executed.");

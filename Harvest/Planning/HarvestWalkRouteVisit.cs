@@ -14,8 +14,11 @@ internal sealed partial class HarvestService
         if (!work.HomeArrivals.Contains(cell.Group)) {
             if (!work.Travel) {
                 if (busy.InvokeFunc() || ExternalNav.TryGetActiveMover(out _)) return true;
+                if (Profile.WalkRoutes.ContainsKey(cell.Group)) {
+                    // PropertyType.Home=1, HouseEnterMode.None=0: the recorded outdoor path owns the walk after teleport.
+                    Svc.PluginInterface.GetIpcSubscriber<int, int?, object>("Lifestream.EnqueuePropertyShortcut").InvokeAction(1, 0);
+                } else Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction("home");
                 work.Travel = true; work.TravelAt = DateTime.UtcNow;
-                Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction("home");
                 return true;
             }
             if (busy.InvokeFunc() || DateTime.UtcNow - work.TravelAt < TimeSpan.FromSeconds(1)) return true;
