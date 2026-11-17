@@ -92,6 +92,24 @@ Check(autoCells.All(c=>observedPatches.Select(p=>p with { Object=p.Object+1000 }
 Check(autoCells.All(c=>observedPatches.Select(p=>p with {Object=p.Object+1000,InstanceKey=p.InstanceKey+1}).Count(p=>GardenRegistration.Matches(c,p))==1), "Zone re-entry can recreate layout instance keys without changing the registered facility and slot.");
 Check(!GardenRegistration.Matches(autoCells[0],observedPatches[0] with {Origin=origin+new Vector3(4,0,0)}),"A matching sub-ID in another bed must not match the registered bed.");
 
+var pot1 = new GardenCell { Group="Indoor 1", Kind="pot", World=1, Territory=2, House=3, X=2.75f, Z=5.37f, LayoutInstanceKey=100, LayoutSubId=0 };
+var pot2 = new GardenCell { Group="Indoor 2", Kind="pot", World=1, Territory=2, House=3, X=3.15f, Z=5.37f, LayoutInstanceKey=101, LayoutSubId=0 };
+var pots = new HarvestProfile();
+Check(pots.RegisterPatches([pot1],()=>{})==1 && pots.RegisterPatches([pot2],()=>{})==1 && pots.Cells.Count==2, "Adjacent indoor pots with sub-ID zero register independently.");
+var potPatches = new[] { new GardenPatch(10,"pot",100,0,pot1.Position,pot1.Position), new GardenPatch(11,"pot",101,0,pot2.Position,pot2.Position) };
+Check(pots.Cells.All(c=>potPatches.Count(p=>GardenRegistration.Matches(c,p))==1), "Each nearby pot resolves to exactly one interaction object.");
+var reenteredPot = new GardenCell { Group="Indoor 2", Kind="pot", World=1, Territory=2, House=3, X=pot2.X, Z=pot2.Z, LayoutInstanceKey=201, LayoutSubId=0 };
+pot2.Owned=true; pot2.Seed=123; pot2.Enabled=false;
+Check(pots.RegisterPatches([reenteredPot],()=>{})==0 && pots.Cells.Count==2 && pot2.Owned && pot2.Seed==123 && !pot2.Enabled, "Re-entry does not duplicate pots or overwrite their crop and selection.");
+Check(GardenRegistration.Matches(pot2,potPatches[1] with {InstanceKey=201}), "Saved pots remain identifiable after layout keys change.");
+var manualPots = new HarvestProfile();
+manualPots.RegisterCell(pot1,()=>{});
+manualPots.RegisterCell(pot2,()=>{});
+Check(manualPots.Cells.Count==2, "Target registration also accepts adjacent distinct pots.");
+reenteredPot.Group="Renamed pot";
+try { manualPots.RegisterCell(reenteredPot,()=>{}); throw new Exception("Duplicate pot accepted."); }
+catch(ArgumentException) { Check(manualPots.Cells.Count==2,"Target registration rejects the same pot after re-entry."); }
+
 var autoProfile = new HarvestProfile { Cells=[new() { Group="밭", World=1, Territory=2, House=3, X=origin.X, Y=origin.Y, Z=origin.Z }] };
 autoProfile.Batch = new() { Cells=[autoProfile.Cells[0].Id] };
 Check(autoProfile.RegisterPatches(autoCells,()=>{}) == 8 && autoProfile.Cells.Count==8 && autoProfile.Batch==null, "Automatic registration replaces the unused ambiguous legacy record and clears only its unstarted batch.");

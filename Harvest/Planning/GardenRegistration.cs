@@ -30,7 +30,13 @@ public static class GardenRegistration
         return ordered.Skip(first).Concat(ordered.Take(first)).ToArray();
     }
 
-    public static bool Matches(GardenCell cell, GardenPatch patch) => cell.Kind == patch.Kind
-        && Vector3.DistanceSquared(cell.Position, patch.Origin) < 0.75f * 0.75f
-        && (cell.LayoutInstanceKey == 0 || cell.LayoutSubId == patch.SubId);
+    public static bool Matches(GardenCell cell, GardenPatch patch) => SameSlot(cell, patch.Kind, patch.Origin, patch.SubId);
+
+    public static bool SameSlot(GardenCell cell, string kind, Vector3 origin, uint subId)
+    {
+        // Pots share sub-ID zero; only their saved furniture position survives zone re-entry.
+        var tolerance = kind == "pot" ? 0.01f : 0.75f;
+        return cell.Kind == kind && Vector3.DistanceSquared(cell.Position, origin) < tolerance * tolerance
+            && (cell.LayoutInstanceKey == 0 || cell.LayoutSubId == subId);
+    }
 }

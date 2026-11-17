@@ -76,7 +76,7 @@ public sealed class HarvestProfile
         var first = discovered[0];
         bool SameHouse(GardenCell c) => c.World == first.World && c.Territory == first.Territory && c.House == first.House;
         var legacy = Cells.Where(c => SameHouse(c) && c.LayoutInstanceKey == 0 && c.Kind == first.Kind
-            && Vector3.DistanceSquared(c.Position, first.Position) < 0.1f * 0.1f).ToArray();
+            && Vector3.DistanceSquared(c.Position, first.Position) < (first.Kind == "pot" ? 0.01f * 0.01f : 0.1f * 0.1f)).ToArray();
         if (legacy.Any(c => c.Owned || c.Pending.Length > 0))
             throw new InvalidOperationException("기존 칸의 진행 중 재배 기록을 확인해야 합니다. 자동 등록으로 덮어쓰지 않습니다.");
         var previous = Cells;
@@ -84,7 +84,7 @@ public sealed class HarvestProfile
         var next = Cells.Except(legacy).ToList();
         var added = 0;
         foreach (var cell in discovered) {
-            if (next.Any(c => SameHouse(c) && c.Kind == cell.Kind && Vector3.DistanceSquared(c.Position, cell.Position) < 0.75f * 0.75f && c.LayoutSubId == cell.LayoutSubId)) continue;
+            if (next.Any(c => SameHouse(c) && GardenRegistration.SameSlot(c, cell.Kind, cell.Position, cell.LayoutSubId))) continue;
             next.Add(cell); added++;
         }
         Cells = next;
@@ -99,8 +99,8 @@ public sealed class HarvestProfile
         if (sameHouse.Any(c => c.Group == cell.Group && c.Index == cell.Index))
             throw new ArgumentException("같은 시설·칸 번호가 이미 등록돼 있습니다. 목록을 확인하거나 다른 번호를 선택하세요.");
         if (sameHouse.Any(c => c.Kind == cell.Kind && (c.LayoutInstanceKey != 0 && cell.LayoutInstanceKey != 0
-                ? Vector3.DistanceSquared(c.Position, cell.Position) < 0.75f * 0.75f && c.LayoutSubId == cell.LayoutSubId
-                : Vector3.Distance(c.Position, cell.Position) < 0.1f)))
+                ? GardenRegistration.SameSlot(c, cell.Kind, cell.Position, cell.LayoutSubId)
+                : Vector3.Distance(c.Position, cell.Position) < (cell.Kind == "pot" ? 0.01f : 0.1f))))
             throw new ArgumentException("이미 등록한 재배 칸입니다. 게임에서 다른 칸을 선택하세요.");
         Cells.Add(cell);
         try { persist(); }
