@@ -125,9 +125,11 @@ internal sealed partial class HarvestService : IDisposable
                 nextRefresh = DateTime.UtcNow + RefreshInterval(true);
             if (!root.GetProperty("Available").GetBoolean() || root.GetProperty("Character").GetUInt64() != owner
                 || !root.GetProperty("RetainerKnown").GetBoolean()) throw new InvalidOperationException("가방·집사 재고 확인 대기");
+            var previousStock = stock;
             stock = root.GetProperty("Rows").EnumerateArray().ToDictionary(r => r.GetProperty("ItemId").GetUInt32(),
                 r => new Stock(r.GetProperty("Inventory").GetInt32(), r.GetProperty("Retainer").GetInt32(), r.GetProperty("CanProcure").GetBoolean(),
                     !r.TryGetProperty("CanProcureNow", out var due) || due.GetBoolean()));
+            if (GardenPolicy.InvalidateHarvestedCells(Profile.Cells, previousStock, stock)) config.Save();
             stockKnown = true;
             if (Profile.BookItems.Count > 0 && !bookReady) {
                 if (bookUpdating) throw new GardenBookPendingException();
@@ -233,7 +235,7 @@ internal sealed partial class HarvestService : IDisposable
         }
         if (Profile.Batch is { } batch) {
             if (!batch.Cross && targets.TryGetValue(batch.Goal, out var required))
-                dirty |= GardenPolicy.LimitOrdinaryBatch(batch, Profile.Cells, required, stock.GetValueOrDefault(batch.Output)?.Total ?? 0);
+                dirty |= GardenPolicy.LimitOrdinaryBatch(batch, Profile.Cells, required, stock.GetValueOrDefault(batch.Output)?.Total ?? 0, catalog!.Crops.GetValueOrDefault(batch.Output)?.Yield ?? 1);
             batch.Clearing |= !targets.ContainsKey(batch.Goal) || stock.GetValueOrDefault(batch.Output)?.Total >= batch.Required;
             var cells = Profile.Cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
             // Rebuild the ancestor stage after an irreplaceable parent seed is exhausted.
@@ -265,7 +267,7 @@ internal sealed partial class HarvestService : IDisposable
             }
             else {
                 selected = Profile.Cells.Where(c => c.Enabled && !c.Owned && (!product!.Flower || c.Kind == "pot"))
-                    .OrderBy(c => c.Kind == "pot" ? 0 : 1).Take(Math.Min(quantity - stock.GetValueOrDefault(item)!.Total,
+                    .OrderBy(c => c.Kind == "pot" ? 0 : 1).Take(Math.Min(GardenPolicy.PlantingCells(quantity, stock.GetValueOrDefault(item)?.Total ?? 0, product!.Yield),
                         stock.GetValueOrDefault(seed) is { CanProcure: false } held ? Math.Min(24, held.Total) : 24)).ToArray();
                 if (selected.Length == 0) {
                     error = product!.Flower ? "꽃을 재배할 실내 화분 칸을 등록·선택해야 합니다." : "재배할 칸을 등록·선택해야 합니다.";
@@ -302,7 +304,7 @@ internal sealed partial class HarvestService : IDisposable
     private bool HasCareDue() => Profile.Cells.Any(c => c.Enabled && c.Owned && c.State == "growing" && c.RetryAt <= DateTime.UtcNow
         && (c.Pending == "Tend" || c.Tended.AddHours(12) <= DateTime.UtcNow));
     private bool Due(GardenCell c) => c.RetryAt <= DateTime.UtcNow
-        && !(c.State == "mature" && Profile.Batch is { } batch && GardenPolicy.IsAnchor(batch, c) && c.Pending.Length == 0)
+        && !(c.Observed != DateTime.MinValue && c.State == "mature" && Profile.Batch is { } batch && GardenPolicy.IsAnchor(batch, c) && c.Pending.Length == 0)
         && (c.Pending.Length > 0 || c.Observed == DateTime.MinValue
         || c.State == "mature" || c.State == "empty" && Profile.Batch?.Clearing != true
         || c.Owned && c.Tended.AddHours(12) <= DateTime.UtcNow

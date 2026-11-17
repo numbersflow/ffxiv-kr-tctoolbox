@@ -32,12 +32,17 @@ internal sealed class Catalog
         var seedForRow = items.Values.Where(i => i.FilterGroup == 20 && i.ItemUICategory.RowId == 82)
             .ToDictionary(i => i.AdditionalData.RowId, i => i.RowId);
         using var timing = JsonDocument.Parse(Resource("seeds.json"));
+        using var yields = JsonDocument.Parse(Resource("crop-yields.json"));
         foreach (var row in rows) {
             if (!seedForRow.TryGetValue(row.RowId, out var seed) || !items.ContainsKey(row.Item.RowId)) continue;
             SeedCrops[seed] = row.Item.RowId;
             var hours = timing.RootElement.TryGetProperty(row.Item.RowId.ToString(CultureInfo.InvariantCulture), out var value)
                 ? value.GetProperty("duration").GetDouble() : 0;
-            Crops[row.Item.RowId] = new(row.Item.RowId, seed, Names[row.Item.RowId], row.IsPlantPotFlowerSeed, hours, []);
+            // shortcut: unknown crops reserve one item per cell; add verified yields when new seeds are supported.
+            var yield = yields.RootElement.TryGetProperty(row.Item.RowId.ToString(CultureInfo.InvariantCulture), out var amount)
+                ? amount.GetProperty("yield").GetInt32() : 1;
+            if (yield <= 0) throw new InvalidDataException("Invalid crop yield");
+            Crops[row.Item.RowId] = new(row.Item.RowId, seed, Names[row.Item.RowId], row.IsPlantPotFlowerSeed, hours, [], yield);
         }
         using var variants = JsonDocument.Parse(Resource("gardening-sources.json"));
         foreach (var p in variants.RootElement.EnumerateObject()) {

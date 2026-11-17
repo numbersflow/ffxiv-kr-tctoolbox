@@ -34,3 +34,11 @@ dotnet run --project checks/GardeningKR/GardeningKR.Checks.csproj -c Release
 - 교배 표: 설치된 `LuminaSupplemental.Excel` 4.3.0의 `GardeningCrossbreed.csv`. 게임 공식 확률표가 아닌 보조 데이터이며 현재 한국 Item/GardeningSeed 행으로 검증한다.
 - `Core/AutomationEndpoint.cs`는 작업공간 AutomationContracts 실행 계약의 스냅샷이다. 런타임에 다른 플러그인 DLL을 직접 참조하지 않는다.
 - 원본 `LICENSE`와 `THIRD-PARTY-NOTICES.md`를 유지한다.
+
+## 필요 수량과 수동 수확 반영
+
+일반 재배는 `ceil((필요 수량 - 인벤·집사 보유량) / 칸당 기본 수확량)`으로 새 칸과 씨앗·흙을 예약한다. 구름도토리 8개는 칸당 5개 기준 2칸이다. 이미 심었거나 처리 결과 확인 중인 칸은 수량이 줄어도 보존한다. 교배의 부모 칸·확률 계산에는 일반 작물 수확량을 적용하지 않는다.
+
+수동 수확량은 기존 재고 조회 주기(5초)에 반영한다. 인벤과 전체 보유량이 함께 늘면 같은 작물의 등록 칸을 다시 확인한다. 보유량만 보고 특정 칸을 비웠다고 추정하지 않는다. 현장에서 빈 칸을 확인하면 기존 목표를 완료하고 다음 품목이나 선행 교배 단계로 계획을 전환한다. 미확정 조작은 별도 결과 복구 절차를 유지한다.
+
+`Harvest/Data/crop-yields.json`은 2026-11-17 [FFXIV Gardening 씨앗 목록](https://www.ffxivgardening.com/seed-list.php)의 품목별 기본 수확량을 대조한 데이터다. 각 `source`는 `https://www.ffxivgardening.com/seed-details.php?SeedID=<source>`의 식별자다. 예: [구름도토리](https://www.ffxivgardening.com/seed-details.php?SeedID=80). 기본 수확량은 라노시아·다날란 흙 기준 첫 수치이며, 흑의장막 흙의 수확량 보너스는 포함하지 않는다. 일반 재배는 기존대로 상점의 화분용 흙을 사용한다. 꽃은 1개이며, 미확인 새 품목은 과소 예약을 피하도록 보수적으로 1개를 사용한다. 한국 데이터의 씨앗 값 결과 행 8188도 이 보수값을 유지한다.

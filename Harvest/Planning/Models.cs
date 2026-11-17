@@ -164,7 +164,7 @@ public sealed class HarvestProfile
     }
 }
 
-public sealed record Crop(uint Item, uint Seed, string Name, bool Flower, double Hours, uint[] Colors);
+public sealed record Crop(uint Item, uint Seed, string Name, bool Flower, double Hours, uint[] Colors, int Yield = 1);
 public sealed record Cross(uint Output, uint A, uint B);
 public sealed record Stock(int Inventory, int Retainer, bool CanProcure, bool CanProcureNow = true)
 {

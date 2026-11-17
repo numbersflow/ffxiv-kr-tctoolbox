@@ -1,0 +1,330 @@
+{
+  "2": {
+    "yield": 50,
+    "source": 73
+  },
+  "3": {
+    "yield": 50,
+    "source": 74
+  },
+  "4": {
+    "yield": 50,
+    "source": 75
+  },
+  "5": {
+    "yield": 50,
+    "source": 76
+  },
+  "6": {
+    "yield": 50,
+    "source": 77
+  },
+  "7": {
+    "yield": 50,
+    "source": 78
+  },
+  "4777": {
+    "yield": 12,
+    "source": 57
+  },
+  "4778": {
+    "yield": 12,
+    "source": 6
+  },
+  "4782": {
+    "yield": 12,
+    "source": 5
+  },
+  "4785": {
+    "yield": 12,
+    "source": 3
+  },
+  "4787": {
+    "yield": 12,
+    "source": 53
+  },
+  "4788": {
+    "yield": 12,
+    "source": 16
+  },
+  "4789": {
+    "yield": 12,
+    "source": 17
+  },
+  "4804": {
+    "yield": 12,
+    "source": 7
+  },
+  "4808": {
+    "yield": 12,
+    "source": 2
+  },
+  "4809": {
+    "yield": 12,
+    "source": 1
+  },
+  "4810": {
+    "yield": 12,
+    "source": 9
+  },
+  "4811": {
+    "yield": 12,
+    "source": 10
+  },
+  "4812": {
+    "yield": 12,
+    "source": 12
+  },
+  "4814": {
+    "yield": 12,
+    "source": 21
+  },
+  "4815": {
+    "yield": 12,
+    "source": 24
+  },
+  "4816": {
+    "yield": 12,
+    "source": 27
+  },
+  "4821": {
+    "yield": 12,
+    "source": 15
+  },
+  "4829": {
+    "yield": 12,
+    "source": 55
+  },
+  "4830": {
+    "yield": 12,
+    "source": 8
+  },
+  "4835": {
+    "yield": 12,
+    "source": 13
+  },
+  "4836": {
+    "yield": 12,
+    "source": 56
+  },
+  "4837": {
+    "yield": 12,
+    "source": 19
+  },
+  "4842": {
+    "yield": 12,
+    "source": 22
+  },
+  "4868": {
+    "yield": 12,
+    "source": 11
+  },
+  "5346": {
+    "yield": 12,
+    "source": 18
+  },
+  "5539": {
+    "yield": 12,
+    "source": 4
+  },
+  "5540": {
+    "yield": 1,
+    "source": 95
+  },
+  "5542": {
+    "yield": 12,
+    "source": 14
+  },
+  "5543": {
+    "yield": 12,
+    "source": 20
+  },
+  "6146": {
+    "yield": 12,
+    "source": 23
+  },
+  "6147": {
+    "yield": 12,
+    "source": 25
+  },
+  "6148": {
+    "yield": 12,
+    "source": 26
+  },
+  "7591": {
+    "yield": 5,
+    "source": 30
+  },
+  "7592": {
+    "yield": 5,
+    "source": 28
+  },
+  "7593": {
+    "yield": 5,
+    "source": 36
+  },
+  "7602": {
+    "yield": 5,
+    "source": 35
+  },
+  "7603": {
+    "yield": 5,
+    "source": 54
+  },
+  "7604": {
+    "yield": 5,
+    "source": 29
+  },
+  "7768": {
+    "yield": 1,
+    "source": 40
+  },
+  "7769": {
+    "yield": 1,
+    "source": 34
+  },
+  "7770": {
+    "yield": 1,
+    "source": 41
+  },
+  "7773": {
+    "yield": 1,
+    "source": 48
+  },
+  "7774": {
+    "yield": 1,
+    "source": 42
+  },
+  "7775": {
+    "yield": 1,
+    "source": 49
+  },
+  "7776": {
+    "yield": 1,
+    "source": 43
+  },
+  "7894": {
+    "yield": 9,
+    "source": 31
+  },
+  "7895": {
+    "yield": 9,
+    "source": 38
+  },
+  "7897": {
+    "yield": 9,
+    "source": 32
+  },
+  "7898": {
+    "yield": 9,
+    "source": 39
+  },
+  "7900": {
+    "yield": 9,
+    "source": 33
+  },
+  "8023": {
+    "yield": 1,
+    "source": 37
+  },
+  "8157": {
+    "yield": 18,
+    "source": 58
+  },
+  "8158": {
+    "yield": 18,
+    "source": 59
+  },
+  "8159": {
+    "yield": 18,
+    "source": 60
+  },
+  "8160": {
+    "yield": 18,
+    "source": 61
+  },
+  "8161": {
+    "yield": 18,
+    "source": 62
+  },
+  "8162": {
+    "yield": 18,
+    "source": 63
+  },
+  "8163": {
+    "yield": 1,
+    "source": 64
+  },
+  "8165": {
+    "yield": 9,
+    "source": 51
+  },
+  "8166": {
+    "yield": 1,
+    "source": 46
+  },
+  "8192": {
+    "yield": 1,
+    "source": 52
+  },
+  "8193": {
+    "yield": 1,
+    "source": 47
+  },
+  "8194": {
+    "yield": 1,
+    "source": 44
+  },
+  "8195": {
+    "yield": 1,
+    "source": 50
+  },
+  "8196": {
+    "yield": 1,
+    "source": 45
+  },
+  "12877": {
+    "yield": 3,
+    "source": 68
+  },
+  "12882": {
+    "yield": 3,
+    "source": 69
+  },
+  "12884": {
+    "yield": 2,
+    "source": 67
+  },
+  "12896": {
+    "yield": 3,
+    "source": 66
+  },
+  "13754": {
+    "yield": 1,
+    "source": 65
+  },
+  "15857": {
+    "yield": 2,
+    "source": 70
+  },
+  "15858": {
+    "yield": 2,
+    "source": 71
+  },
+  "17548": {
+    "yield": 5,
+    "source": 80
+  },
+  "20791": {
+    "yield": 1,
+    "source": 84
+  },
+  "20793": {
+    "yield": 1,
+    "source": 85
+  },
+  "30873": {
+    "yield": 1,
+    "source": 93
+  }
+}

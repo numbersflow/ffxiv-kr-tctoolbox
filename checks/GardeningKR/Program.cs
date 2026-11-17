@@ -19,6 +19,8 @@ Run();
 
 static void Run()
 {
+typeof(Svc).GetProperty("PluginInterface")!.SetValue(null,
+    System.Reflection.DispatchProxy.Create<Dalamud.Plugin.IDalamudPluginInterface, ConfigSaveProxy>());
 var passed = 0;
 void Check(bool condition, string message)
 {
@@ -220,6 +222,26 @@ scopeProfile.SelectBook(17548,false,3);
 Check(scopeProfile.BookSelected(17548,1) && !scopeProfile.BookSelected(17548,3), "An individual expansion can be excluded from an all-expansion selection");
 var restoredScopes = JsonConvert.DeserializeObject<HarvestProfile>(JsonConvert.SerializeObject(scopeProfile))!;
 Check(restoredScopes.BookScopes[17548].SetEquals(scopeProfile.BookScopes[17548]), "Saved per-item expansion scopes survive reload");
+Check(GardenPolicy.PlantingCells(8,0,5)==2 && GardenPolicy.PlantingCells(2,0,5)==1, "Five-item crops use ceiling division for eight-item and HW-only goals");
+Check(GardenPolicy.PlantingCells(8,5,5)==1 && GardenPolicy.PlantingCells(8,10,5)==0, "Manually harvested stock reduces future planting");
+var yieldCells=Enumerable.Range(0,8).Select(i=>new GardenCell {Index=i}).ToArray();
+var yieldBatch=new GardenBatch {Required=8,Cells=yieldCells.Select(c=>c.Id).ToList()};
+GardenPolicy.LimitOrdinaryBatch(yieldBatch,yieldCells,8,0,5);
+Check(yieldBatch.Cells.Count==2,"Existing reservations must also account for five items per cell");
+yieldCells[0].Owned=true; yieldBatch.Cells=yieldCells.Select(c=>c.Id).ToList();
+GardenPolicy.LimitOrdinaryBatch(yieldBatch,yieldCells,8,5,5);
+Check(yieldBatch.Cells.Count==1 && yieldBatch.Cells[0]==yieldCells[0].Id,"In-flight five-item yield plus manually harvested stock prevents extra seeds");
+foreach(var c in yieldCells)c.Owned=true;
+yieldBatch.Cells=yieldCells.Select(c=>c.Id).ToList();
+GardenPolicy.LimitOrdinaryBatch(yieldBatch,yieldCells,8,10,5);
+Check(yieldBatch.Cells.Count==8,"Surplus planted crops are preserved after the goal is satisfied");
+Check(GardenPolicy.PlantingCells(int.MaxValue,0,5)==429496730,"Large targets cannot overflow ceiling division");
+var manualCell=new GardenCell {Owned=true,Crop=17548,Observed=DateTime.UtcNow,RetryAt=DateTime.UtcNow.AddHours(1)};
+var stockBefore=new Dictionary<uint,Stock>{[17548]=new(0,5,false)};
+Check(!GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,0,false)}),"Retainer withdrawal does not pretend a crop was harvested");
+Check(GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,5,false)}) && manualCell.Owned && manualCell.Observed==DateTime.MinValue && manualCell.RetryAt==DateTime.MinValue,"Manual harvest updates stock and requests real slot observation without guessing an empty cell");
+manualCell.Pending="Harvest";manualCell.Observed=DateTime.UtcNow;
+Check(!GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,5,false)}) && manualCell.Pending=="Harvest","Uncertain harvests retain reconciliation ownership");
 var reservedCells=Enumerable.Range(0,8).Select(i=>new GardenCell {Index=i}).ToArray();
 var reservedBatch=new GardenBatch {Required=8,Cells=reservedCells.Select(c=>c.Id).ToList()};
 Check(GardenPolicy.LimitOrdinaryBatch(reservedBatch,reservedCells,2,0) && reservedBatch.Cells.Count==2 && reservedBatch.Required==2,"Reducing the scope releases surplus unplanted cells");
@@ -239,6 +261,13 @@ Check(!GardenPolicy.LimitOrdinaryBatch(reservedBatch,reservedCells,2,0) && reser
     Set("stock",new Dictionary<uint,Stock>{[17548]=new(2,0,false)});
     bool DueVisit()=>(bool)typeof(HarvestService).GetMethod("HasDueVisit",flags)!.Invoke(service,null)!;
     Check(DueVisit(),"Meeting the reduced goal must not abandon already planted owned crops");
+    p.Batch!.Cross=true;p.Batch.Clearing=false;p.Batch.Cells=["other",owned.Id];
+    owned.State="mature";owned.Observed=DateTime.UtcNow;
+    bool DueAnchor()=>(bool)typeof(HarvestService).GetMethod("Due",flags)!.Invoke(service,[owned])!;
+    Check(!DueAnchor(),"A confirmed mature crossing anchor is preserved");
+    owned.Observed=DateTime.MinValue;
+    Check(DueAnchor(),"A manually harvested crossing anchor must be reobserved even if its cached state was mature");
+    p.Batch.Clearing=true;
     owned.Owned=false;owned.State="empty";
     Check(!DueVisit(),"Once owned crops are cleared, meeting the goal stops further garden visits");
 }
@@ -331,6 +360,7 @@ Check(CropNameMatching.Resolve("알 수 없는 꽃이", new Dictionary<string, u
 using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV - KOREA\game\sqpack",
     new Lumina.LuminaOptions { PanicOnSheetChecksumMismatch = false, DefaultExcelLanguage = (Lumina.Data.Language)7 })) {
     var catalog = new Catalog(game.GetExcelSheet<Lumina.Excel.Sheets.Item>(), game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>());
+    var observedStock = new Dictionary<uint,Stock>();
     (Dictionary<uint,int> Supplies, string Error) Prepare(HarvestProfile p, params uint[] roots)
     {
         var service = (HarvestService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HarvestService));
@@ -338,7 +368,7 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
         void Set(string name, object value) => typeof(HarvestService).GetField(name,flags)!.SetValue(service,value);
         Set("owner",10ul); Set("config",new Configuration { Profiles = new() { [10] = p } }); Set("catalog",catalog);
         Set("bookCache",new GardenBookCache()); Set("error","");
-        Set("stock",catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct().ToDictionary(id=>id,id=>new Stock(0,0,roots.Contains(id))));
+        Set("stock",catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct().ToDictionary(id=>id,id=>observedStock.GetValueOrDefault(id) ?? new Stock(0,0,roots.Contains(id))));
         typeof(HarvestService).GetMethod("Replan",flags)!.Invoke(service,null);
         return ((Dictionary<uint,int>)typeof(HarvestService).GetField("supplies",flags)!.GetValue(service)!,
             (string)typeof(HarvestService).GetField("error",flags)!.GetValue(service)!);
@@ -351,6 +381,23 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
     Check(oneCrossCell.Supplies.Count == 0, "Actual Replan requires two adjacent cells before preparing crossbreeding parents.");
     var directSeed = Prepare(new() { Goals=[new() { Item=14007, Quantity=2 }] },14007);
     Check(directSeed.Supplies.GetValueOrDefault(14007u) == 2, "Explicit raw seed targets can still be procured without a garden.");
+    Check(catalog.Crops[17548].Yield==5 && catalog.Crops.Values.Where(c=>c.Flower).All(c=>c.Yield==1),"Installed cloud acorns yield five and flower variants retain one per pot");
+    var ordinaryProfile=new HarvestProfile {Goals=[new(){Item=17548,Quantity=8}],Cells=Enumerable.Range(0,8).Select(i=>new GardenCell{Index=i,State="empty"}).ToList()};
+    var ordinary=Prepare(ordinaryProfile,17547);
+    Check(ordinaryProfile.Batch?.Cells.Count==2 && ordinary.Supplies[17547]==2 && ordinary.Supplies[16026]==2,"Actual Replan reserves two seeds and soils for eight acorns, not eight cells");
+    foreach(var id in ordinaryProfile.Batch!.Cells)ordinaryProfile.Cells.Single(c=>c.Id==id).Owned=true;
+    observedStock[17548]=new(5,0,false);
+    Prepare(ordinaryProfile,17547);
+    Check(ordinaryProfile.Batch!.Cells.Count==2 && ordinaryProfile.Cells.Count(c=>c.Owned)==2,"Real replanning preserves already planted surplus instead of deleting crop records");
+    foreach(var cell in ordinaryProfile.Cells){cell.Owned=false;cell.State="empty";}
+    observedStock[17548]=new(10,0,false);
+    ordinaryProfile.Goals.Add(new(){Item=7774,Quantity=1});
+    var nextCrop=Prepare(ordinaryProfile,7744,7742);
+    Check(ordinaryProfile.Goals[0].Complete && ordinaryProfile.Batch is {Goal:7774,Cross:true} && nextCrop.Supplies.Count>0,"Manual harvest stock completes the old target and actual Replan prepares the next crop's ancestor seeds");
+    observedStock.Clear();
+    using(var yields=System.Text.Json.JsonDocument.Parse(File.ReadAllText("Harvest/Data/crop-yields.json")))
+        Check(catalog.Crops.Values.Where(c=>!c.Flower && c.Item!=8188).All(c=>yields.RootElement.TryGetProperty(c.Item.ToString(),out var row) && row.GetProperty("yield").GetInt32()==c.Yield),
+            "Every installed non-flower produce row has verified yield data; the seed-valued 8188 row retains the conservative one-item fallback");
     Check(catalog.SeedCrops.Count == 108 && catalog.Crosses.Count == 3768, "Installed Korean sheets must validate every embedded crossbreeding row.");
     Check(catalog.Crops[14071].Seed == 14007 && catalog.Crops[14071].Hours == 24, "Oldrose growth data must map to the installed Korean seed.");
     Check(catalog.Crops.Values.Any(c => c.Flower && c.Colors.Length == 3), "Mixed flower colors need all three pomaces.");
@@ -364,4 +411,10 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
     Console.WriteLine($"KR data: {catalog.Crops.Count} outputs, {catalog.SeedCrops.Count} seeds, {catalog.Crosses.Count} crosses.");
 }
 Console.WriteLine($"PASS {passed} gardening compatibility checks; no native game actions executed.");
+}
+
+public class ConfigSaveProxy : System.Reflection.DispatchProxy
+{
+    protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args)
+        => method!.Name == "SavePluginConfig" ? null : throw new NotSupportedException(method.Name);
 }

@@ -15,15 +15,33 @@ public static class GardenPolicy
     public static bool IsAnchor(GardenBatch batch, GardenCell cell) =>
         batch.Cross && !batch.Clearing && batch.Cells.Count > 1 && batch.Cells[1] == cell.Id;
 
-    public static bool LimitOrdinaryBatch(GardenBatch batch, IEnumerable<GardenCell> cells, int required, int owned)
+    public static int PlantingCells(int required, int owned, int yield)
+    {
+        if (required < 0 || owned < 0 || yield <= 0) throw new ArgumentOutOfRangeException(nameof(yield));
+        return (int)((Math.Max(0L, (long)required - owned) + yield - 1) / yield);
+    }
+
+    public static bool LimitOrdinaryBatch(GardenBatch batch, IEnumerable<GardenCell> cells, int required, int owned, int yield = 1)
     {
         if (batch.Cross) return false;
         var selected = cells.Where(c => batch.Cells.Contains(c.Id)).ToArray();
         var started = selected.Where(c => c.Owned || c.Pending.Length > 0).ToArray();
-        var remaining = Math.Max(0, required - owned - started.Length);
+        var remaining = Math.Max(0, PlantingCells(required, owned, yield) - started.Length);
         var ids = started.Concat(selected.Except(started).Take(remaining)).Select(c => c.Id).ToList();
         var changed = batch.Required != required || !batch.Cells.SequenceEqual(ids);
         batch.Required = required; batch.Cells = ids;
+        return changed;
+    }
+
+    public static bool InvalidateHarvestedCells(IEnumerable<GardenCell> cells, IReadOnlyDictionary<uint, Stock> before, IReadOnlyDictionary<uint, Stock> after)
+    {
+        var changed = false;
+        foreach (var cell in cells.Where(c => c.Owned && c.Pending.Length == 0 && c.Crop != 0)) {
+            if (!before.TryGetValue(cell.Crop, out var previous) || !after.TryGetValue(cell.Crop, out var current)
+                || current.Inventory <= previous.Inventory || current.Total <= previous.Total) continue;
+            // Inventory gains cannot identify the emptied slot; verify each matching crop in game.
+            cell.Observed = DateTime.MinValue; cell.RetryAt = DateTime.MinValue; changed = true;
+        }
         return changed;
     }
 
