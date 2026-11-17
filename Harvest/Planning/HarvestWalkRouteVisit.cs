@@ -13,7 +13,8 @@ internal sealed partial class HarvestService
         if (work.FailedRoutes.Contains(cell.Group)) throw new InvalidOperationException("이번 방문에서 해당 경로가 실패하여 재이동을 보류합니다.");
         var busy = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
         var arrivalKey = cell.Kind == "pot" ? $"pot:{cell.World}:{cell.Territory}:{cell.House}:{cell.Travel}" : cell.Group;
-        if (work.HomeArrivals.Contains(arrivalKey) && !work.Travel && !AtCell(cell)) {
+        if (work.HomeArrivals.Contains(arrivalKey) && !work.Travel
+            && (cell.Kind == "pot" || work.WalkedRoutes.Contains(cell.Group)) && !AtCell(cell)) {
             work.HomeArrivals.Remove(arrivalKey); work.WalkedRoutes.Remove(cell.Group);
         }
         if (!work.HomeArrivals.Contains(arrivalKey)) {

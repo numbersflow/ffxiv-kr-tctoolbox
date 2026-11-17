@@ -24,8 +24,8 @@ namespace Harvest.Planning {
   private readonly HarvestProfile Profile=new();
   internal HarvestService(GardenWalkRoute route){Profile.WalkRoutes[route.Group]=route;}
   private GardenRouteLocation CurrentRouteLocation()=>new(1,2,1,3);
-  internal string CurrentKind="plot";
-  private bool AtCell(GardenCell cell)=>cell.Kind==CurrentKind;
+  internal string CurrentKind="plot";internal bool InRegisteredPlot=true;
+  private bool AtCell(GardenCell cell)=>cell.Kind==CurrentKind && (cell.Kind!="plot" || InRegisteredPlot);
   internal bool Run(GardenCell cell)=>WalkingRouteInProgress(work,cell,out _);
   internal void TeleportFinished()=>work.TravelAt=DateTime.UtcNow.AddSeconds(-2);
   internal void RemoveRoute()=>Profile.WalkRoutes.Clear();

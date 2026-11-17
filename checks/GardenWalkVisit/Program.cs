@@ -68,4 +68,13 @@ Check(!service.Run(pot) && !service.Run(otherPot) && Svc.PluginInterface.HomeReq
     "A settled indoor arrival releases both pots after the same pending teleport");
 service=new(route);service.RemoveRoute();service.Run(pot);service.TeleportFinished();service.Run(pot);service.ArrivalTimedOut();
 try{service.Run(pot);throw new Exception("Wrong indoor house accepted");}catch(InvalidOperationException){checks++;}
+service=new(route);service.InRegisteredPlot=false;Svc.Objects.LocalPlayer.Position=Vector3.Zero;
+var beforeWalkRequests=Svc.PluginInterface.HomeRequests;
+service.Run(cell);service.TeleportFinished();service.Run(cell);
+Svc.PluginInterface.Busy=true;
+Check(service.Run(cell) && Svc.PluginInterface.HomeRequests==beforeWalkRequests+1,
+    "A recorded walk may pass outside the registered plot while its Lifestream path is still running");
+Svc.PluginInterface.Busy=false;Svc.Objects.LocalPlayer.Position=route.Points[^1].Position;service.InRegisteredPlot=true;
+Check(!service.Run(cell) && Svc.PluginInterface.HomeRequests==beforeWalkRequests+1,
+    "Finishing an outdoor walk must keep its arrival record instead of teleporting again before interaction");
 Console.WriteLine($"PASS {checks} actual garden walk visit checks; no native game actions executed.");
