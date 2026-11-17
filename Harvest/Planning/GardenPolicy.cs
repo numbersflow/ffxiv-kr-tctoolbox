@@ -45,6 +45,22 @@ public static class GardenPolicy
         return changed;
     }
 
+    public static Dictionary<uint,int> SoilReserve(HarvestProfile profile, IReadOnlyDictionary<uint,Crop> crops,
+        IReadOnlyDictionary<uint,uint> seedCrops, IEnumerable<Cross> crosses, IReadOnlyDictionary<uint,Stock> stock)
+    {
+        var slots = Math.Clamp(profile.Cells.Count(c => c.Enabled && c.Kind == "plot"), 0, 24);
+        if (slots == 0 || profile.Soil is < 7758 or > 7766) return [];
+        var selected = profile.BookItems.Concat(profile.Goals.Where(g => g.Enabled && !g.Complete && g.Quantity > 0).Select(g => g.Item)).Distinct();
+        foreach (var item in selected) {
+            var seed = crops.TryGetValue(item, out var crop) ? crop.Seed : seedCrops.ContainsKey(item) ? item : 0;
+            if (seed == 0 || crop?.Flower == true) continue;
+            if (profile.Batch is { Cross: true, Clearing: false } batch && batch.Goal == item
+                || stock.GetValueOrDefault(seed)?.CanProcure != true && crosses.Any(c => c.Output == seed))
+                return new() { [profile.Soil] = slots * 3 };
+        }
+        return [];
+    }
+
     public static int RequiredSlots(IEnumerable<(uint Item, int Count, int Stack, int Room)> outputs) =>
         outputs.GroupBy(o => o.Item).Sum(g => {
             var first = g.First();

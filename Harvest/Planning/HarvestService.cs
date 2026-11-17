@@ -20,6 +20,8 @@ internal sealed partial class HarvestService : IDisposable
     private readonly ICallGateProvider<string> snapshotGate;
     private readonly ICallGateProvider<string, string> configGate;
     private readonly ICallGateProvider<string> protectionGate;
+    private readonly ICallGateProvider<string> soilVentureGate;
+    private string soilVentureSnapshot = "{\"Available\":false}";
     private readonly ICallGateProvider<string> gardenViewGate;
     private readonly ICallGateProvider<uint, string> gardenScopeGate;
     private readonly ConcurrentDictionary<uint, string> gardenScopes = new();
@@ -74,6 +76,8 @@ internal sealed partial class HarvestService : IDisposable
         snapshotGate.RegisterFunc(() => snapshot);
         configGate = Svc.PluginInterface.GetIpcProvider<string, string>("Harvest.Configure");
         configGate.RegisterFunc(request => IpcFrameworkGate.Get("Harvest.Configure", () => Configure(request), "{\"Accepted\":false}"));
+        soilVentureGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetSoilVentureTargets");
+        soilVentureGate.RegisterFunc(() => soilVentureSnapshot);
         protectionGate = Svc.PluginInterface.GetIpcProvider<string>("Harvest.GetProtection");
         protectionGate.RegisterFunc(() => IpcFrameworkGate.Get("Harvest.GetProtection",
             () => JsonSerializer.Serialize(new { Available = owner != 0, Character = owner, Items = Reservations() }), "{\"Available\":false}"));
@@ -93,6 +97,9 @@ internal sealed partial class HarvestService : IDisposable
         foreach (var item in Profile.BookItems)
             result[item] = Math.Max(result.GetValueOrDefault(item), books.GetValueOrDefault(item));
         foreach (var cell in Profile.Cells.Where(c => c.Owned && c.Seed != 0)) result[cell.Seed] = Math.Max(1, result.GetValueOrDefault(cell.Seed));
+        if (catalog != null)
+            foreach (var (soil, count) in GardenPolicy.SoilReserve(Profile, catalog.Crops, catalog.SeedCrops, catalog.Crosses, stock))
+                result[soil] = Math.Max(result.GetValueOrDefault(soil), count);
         return result.Where(p => p.Value > 0).ToDictionary();
     }
 
@@ -105,7 +112,7 @@ internal sealed partial class HarvestService : IDisposable
             return;
         }
         var current = Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0;
-        if (current != owner) { owner = current; stock.Clear(); bookCache.Reset(); scopedBookCaches.Clear(); selectedBookNeeds = null; supplies.Clear(); gardenScopes.Clear(); gardenView = "{\"Available\":false}"; }
+        if (current != owner) { owner = current; stock.Clear(); bookCache.Reset(); scopedBookCaches.Clear(); selectedBookNeeds = null; supplies.Clear(); gardenScopes.Clear(); soilVentureSnapshot = "{\"Available\":false}"; gardenView = "{\"Available\":false}"; }
         stockKnown = false;
         if (owner == 0) { displayProfile = null; snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"접속 대기\"}"; return; }
         while (pendingConfiguration.TryDequeue(out var change)) Configure(change);
@@ -165,7 +172,7 @@ internal sealed partial class HarvestService : IDisposable
             PublishGardenView();
             using var state = JsonDocument.Parse(snapshot);
             var r = state.RootElement;
-            var readiness = $"available={r.GetProperty("Available")}, ready={r.GetProperty("Ready")}, bookReady={bookReady}, bookUpdating={bookUpdating}, bookSnapshot={bookCache.HasSnapshot}, stockKnown={stockKnown}, error={error}, batch={Profile.Batch?.Output}, supplies={string.Join(',', supplies.Select(p => $"{p.Key}:{p.Value}[bag={stock.GetValueOrDefault(p.Key)?.Inventory},retainer={stock.GetValueOrDefault(p.Key)?.Retainer},now={stock.GetValueOrDefault(p.Key)?.CanProcureNow}]"))}";
+            var readiness = $"available={r.GetProperty("Available")}, ready={r.GetProperty("Ready")}, bookReady={bookReady}, bookUpdating={bookUpdating}, bookSnapshot={bookCache.HasSnapshot}, stockKnown={stockKnown}, error={error}, batch={Profile.Batch?.Output}, soilReserve={soilVentureSnapshot}, supplies={string.Join(',', supplies.Select(p => $"{p.Key}:{p.Value}[bag={stock.GetValueOrDefault(p.Key)?.Inventory},retainer={stock.GetValueOrDefault(p.Key)?.Retainer},now={stock.GetValueOrDefault(p.Key)?.CanProcureNow}]"))}";
             if ((!bookUpdating || error.Length > 0) && readiness != lastReadiness) { lastReadiness = readiness; Svc.Log.Information("Garden readiness: " + readiness); }
         }
     }
@@ -193,6 +200,10 @@ internal sealed partial class HarvestService : IDisposable
 
     private void PublishGardenView()
     {
+        var soils = owner != 0 && catalog != null
+            ? GardenPolicy.SoilReserve(Profile, catalog.Crops, catalog.SeedCrops, catalog.Crosses, stock) : new Dictionary<uint,int>();
+        soilVentureSnapshot = JsonSerializer.Serialize(new { Available = owner != 0 && catalog != null && stockKnown, Character = owner,
+            Targets = soils.Select(p => new { ItemId = p.Key, Name = catalog!.Names.GetValueOrDefault(p.Key) ?? p.Key.ToString(), TargetCount = p.Value }).ToArray() });
         displayProfile = JsonSerializer.Deserialize<HarvestProfile>(JsonSerializer.Serialize(Profile));
         if (catalog == null || owner == 0) return;
         gardenView = JsonSerializer.Serialize(new { Available = true, Character = owner, Expansion = 6, Error = error,
@@ -325,7 +336,7 @@ internal sealed partial class HarvestService : IDisposable
         Svc.Framework.Update -= RecordRoutePosition;
         Svc.Framework.Update -= Refresh;
         endpoint.Dispose();
-        snapshotGate.UnregisterFunc(); configGate.UnregisterFunc(); protectionGate.UnregisterFunc();
+        snapshotGate.UnregisterFunc(); configGate.UnregisterFunc(); protectionGate.UnregisterFunc(); soilVentureGate.UnregisterFunc();
         gardenViewGate.UnregisterFunc();
         gardenScopeGate.UnregisterFunc();
         routeRecordingGate.UnregisterFunc();

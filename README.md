@@ -44,3 +44,9 @@ dotnet run --project checks/GardeningKR/GardeningKR.Checks.csproj -c Release
 `Harvest/Data/crop-yields.json`은 2026-11-17 [FFXIV Gardening 씨앗 목록](https://www.ffxivgardening.com/seed-list.php)의 품목별 기본 수확량을 대조한 데이터다. 각 `source`는 `https://www.ffxivgardening.com/seed-details.php?SeedID=<source>`의 식별자다. 예: [구름도토리](https://www.ffxivgardening.com/seed-details.php?SeedID=80). 기본 수확량은 라노시아·다날란 흙 기준 첫 수치이며, 흑의장막 흙의 수확량 보너스는 포함하지 않는다. 일반 재배는 기존대로 상점의 화분용 흙을 사용한다. 꽃은 1개이며, 미확인 새 품목은 과소 예약을 피하도록 보수적으로 1개를 사용한다. 한국 데이터의 씨앗 값 결과 행 8188도 이 보수값을 유지한다.
 
 ??? ?? ?? ???? ?? ??? ??? ??? `Supply.Withdrawals`? ?? ????. Workflow? ? ??? GBR? ????, GBR? ?? ?? ???? ?? ?? ?? ???? ?? ???? ???. ??? ?? ??? ?? ????? ??? ?? ????, ??? ??????? ??? ??? ?? ???? ????.
+
+## 광부 집사 흙 사전 비축
+
+화단에서 선택된 품목에 선행 교배가 필요하면 등록·사용 중인 야외 재배 칸의 3회분을 교배용 흙 목표로 게시한다. 8칸은 24개이며, 등록 한도 24칸에서는 최대 72개다. 완료된 수동 수량 목표와 해제한 품목은 제외한다. 일반 재배·꽃에 사용하는 상점 화분용 흙은 광부 수행 대상이 아니다.
+
+`Harvest.GetSoilVentureTargets`는 캐릭터 식별자와 `Targets` 배열(`ItemId`, `Name`, `TargetCount`)을 반환한다. Workflow의 `GardeningEnabled`가 켜져 있을 때 AutoRetainer가 이 목표와 GBR의 현재 인벤·집사 재고를 읽는다. 기존 재료 수행을 사용하는 광부 집사 중 한 명만 비축에 배정하며, 수행 중·회수 전 물량과 배정 직후 예약 수량도 반영한다. 재고가 충분하거나 화단 작업·품목 선택을 끄면 기존 제작수첩·업적 재료 선택으로 복귀한다. 레벨·장비·채집 수첩 해금 검사는 기존 집사 수행 조건을 그대로 따른다. 진행 중인 수행은 강제 교체하지 않고 다음 정상 재파견 때 적용한다.
