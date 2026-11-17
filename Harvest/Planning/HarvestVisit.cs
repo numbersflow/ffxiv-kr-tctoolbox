@@ -71,6 +71,9 @@ internal sealed partial class HarvestService
             if (work.Paused) return Busy(work, "일시정지");
             if (work.Cell == null) {
                 var batch = Profile.Batch;
+                var waiting = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true
+                    && !work.Done.Contains(c.Id) && !c.Owned && c.Pending.Length == 0 && Due(c)).ToArray();
+                if (waiting.Length > 0) ReadVisitInventory(waiting.Select(c => c.Seed).Append(CurrentSoil).Where(i => i > 0));
                 work.Cell = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true && !work.Done.Contains(c.Id) && Due(c))
                     .Where(c => GardenPolicy.CanVisit(c, stock, CurrentSoil))
                     .OrderBy(c => c.Owned || c.Pending.Length > 0 ? 0 : 1).FirstOrDefault();
@@ -197,15 +200,19 @@ internal sealed partial class HarvestService
         var message = garden.EnqueueSingle(action, work.Object, item, work.Cell!.Seed, CurrentSoil);
         if (message.Length > 0) throw new InvalidOperationException(message);
     }
-    private int Bag(uint item)
+    private int Bag(uint item) => ReadVisitInventory(new[] { item })[item];
+    private Dictionary<uint,int> ReadVisitInventory(IEnumerable<uint> items)
     {
+        var ids = items.Distinct().ToArray();
         using var doc = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<string, string>("GatherBuddyReborn.GetHarvestStock")
-            .InvokeFunc(JsonSerializer.Serialize(new[] { item })));
+            .InvokeFunc(JsonSerializer.Serialize(ids)));
         var r = doc.RootElement;
         if (!r.GetProperty("Available").GetBoolean() || r.GetProperty("Character").GetUInt64() != owner) throw new InvalidOperationException("재고 재확인 대기");
-        var count = r.GetProperty("Rows")[0].GetProperty("Inventory").GetInt32();
-        if (stock.TryGetValue(item, out var previous)) stock[item] = previous with { Inventory = count };
-        return count;
+        var counts = r.GetProperty("Rows").EnumerateArray().ToDictionary(x => x.GetProperty("ItemId").GetUInt32(), x => x.GetProperty("Inventory").GetInt32());
+        if (ids.Any(id => !counts.ContainsKey(id)) || counts.Values.Any(count => count < 0)) throw new InvalidOperationException("재고 응답이 불완전합니다.");
+        foreach (var (id, count) in counts)
+            if (stock.TryGetValue(id, out var previous)) stock[id] = previous with { Inventory = count };
+        return counts;
     }
     private static unsafe int FreeSlots()
     {
@@ -262,6 +269,18 @@ internal sealed partial class HarvestService
     }
     private AutomationObservation End(Visit work, string result)
     {
+        if (result == "Succeeded" && Profile.Batch is { Clearing: false } batch) {
+            var waiting = Profile.Cells.Where(c => c.Enabled && batch.Cells.Contains(c.Id) && !c.Owned
+                && c.Pending.Length == 0 && c.State is "empty" or "unscanned").ToArray();
+            if (waiting.Length > 0) {
+                result = "Partial";
+                var missing = waiting.GroupBy(c => c.Seed).Select(g => (Item: g.Key, Needed: g.Count()))
+                    .Append((Item: CurrentSoil, Needed: waiting.Length)).Where(p => (stock.GetValueOrDefault(p.Item)?.Inventory ?? 0) < p.Needed)
+                    .Select(p => $"{catalog!.Names.GetValueOrDefault(p.Item) ?? p.Item.ToString()} {stock.GetValueOrDefault(p.Item)?.Inventory ?? 0}/{p.Needed}").ToArray();
+                work.Phase = missing.Length > 0 ? "재배 준비 미완료 · " + string.Join(", ", missing)
+                    : $"재배 칸 확인·재시도 대기 · 남은 {waiting.Length}칸";
+            }
+        }
         visit = null; nextRefresh = DateTime.MinValue; config.Save();
         return new(false, work.Completed, Profile.Batch?.Cells.Count ?? 1,
             work.RequiredSpace > 0 ? "Gardening:BagSpace/" + work.RequiredSpace : "Gardening", result, work.Phase, work.Completed);

@@ -395,6 +395,26 @@ using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV
     var nextCrop=Prepare(ordinaryProfile,7744,7742);
     Check(ordinaryProfile.Goals[0].Complete && ordinaryProfile.Batch is {Goal:7774,Cross:true} && nextCrop.Supplies.Count>0,"Manual harvest stock completes the old target and actual Replan prepares the next crop's ancestor seeds");
     observedStock.Clear();
+    {
+        const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+        var cells=new List<GardenCell>{new(){Owned=true,State="growing",Seed=7744},new(){State="empty",Seed=13768}};
+        var visitProfile=new HarvestProfile{Cells=cells,Batch=new(){Cross=true,Cells=cells.Select(c=>c.Id).ToList()}};
+        var service=(HarvestService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HarvestService));
+        void Set(string name,object value)=>typeof(HarvestService).GetField(name,flags)!.SetValue(service,value);
+        var inventory=new Dictionary<uint,Stock>{[13768]=new(0,0,true),[7766]=new(0,0,true)};
+        Set("owner",10ul);Set("config",new Configuration{Profiles=new(){[10]=visitProfile}});Set("catalog",catalog);Set("stock",inventory);
+        StockGateProxy.Items=new(){[13768]=1,[7766]=0};
+        typeof(HarvestService).GetMethod("ReadVisitInventory",flags)!.Invoke(service,[new uint[]{13768,7766}]);
+        Check(inventory[13768].Inventory==1,"Actual visit refresh discovers a newly withdrawn second parent instead of skipping it from stale stock");
+        var visitType=typeof(HarvestService).GetNestedType("Visit",System.Reflection.BindingFlags.NonPublic)!;
+        var work=Activator.CreateInstance(visitType,true)!;visitType.GetField("Completed")!.SetValue(work,1);
+        var ended=(LocalAutomation.AutomationObservation)typeof(HarvestService).GetMethod("End",flags)!.Invoke(service,[work,"Succeeded"])!;
+        Check(ended.Result=="Partial" && ended.Completed==1 && ended.Total==2 && ended.Detail.Contains("0/1"),"One planted crossbreeding parent and one empty cell cannot be reported as success; missing soil is named");
+        cells[1].Owned=true;cells[1].State="growing";
+        ended=(LocalAutomation.AutomationObservation)typeof(HarvestService).GetMethod("End",flags)!.Invoke(service,[work,"Succeeded"])!;
+        Check(ended.Result=="Succeeded","Fully planted growing crops may finish the visit and allow other jobs");
+    }
+
     using(var yields=System.Text.Json.JsonDocument.Parse(File.ReadAllText("Harvest/Data/crop-yields.json")))
         Check(catalog.Crops.Values.Where(c=>!c.Flower && c.Item!=8188).All(c=>yields.RootElement.TryGetProperty(c.Item.ToString(),out var row) && row.GetProperty("yield").GetInt32()==c.Yield),
             "Every installed non-flower produce row has verified yield data; the seed-valued 8188 row retains the conservative one-item fallback");
@@ -416,5 +436,20 @@ Console.WriteLine($"PASS {passed} gardening compatibility checks; no native game
 public class ConfigSaveProxy : System.Reflection.DispatchProxy
 {
     protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args)
-        => method!.Name == "SavePluginConfig" ? null : throw new NotSupportedException(method.Name);
+        => method!.Name switch {
+            "SavePluginConfig" => null,
+            "GetIpcSubscriber" => System.Reflection.DispatchProxy.Create(method.ReturnType,typeof(StockGateProxy)),
+            _ => throw new NotSupportedException(method.Name)
+        };
+}
+
+public class StockGateProxy : System.Reflection.DispatchProxy
+{
+    public static Dictionary<uint,int> Items=[];
+    protected override object? Invoke(System.Reflection.MethodInfo? method,object?[]? args)
+    {
+        if(method!.Name!="InvokeFunc")throw new NotSupportedException(method.Name);
+        var ids=System.Text.Json.JsonSerializer.Deserialize<uint[]>((string)args![0]!)!;
+        return System.Text.Json.JsonSerializer.Serialize(new{Available=true,Character=10ul,Rows=ids.Select(id=>new{ItemId=id,Inventory=Items.GetValueOrDefault(id)}).ToArray()});
+    }
 }
