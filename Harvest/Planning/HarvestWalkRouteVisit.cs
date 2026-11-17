@@ -10,6 +10,7 @@ internal sealed partial class HarvestService
     private bool WalkingRouteInProgress(Visit work, GardenCell cell, out string phase)
     {
         phase = "개인주택 텔레포트";
+        if (work.FailedRoutes.Contains(cell.Group)) throw new InvalidOperationException("이번 방문에서 해당 경로가 실패하여 재이동을 보류합니다.");
         var busy = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
         if (!work.HomeArrivals.Contains(cell.Group)) {
             if (!work.Travel) {

@@ -145,7 +145,7 @@ internal sealed partial class HarvestService : IDisposable
             error = "";
             Replan();
             var visitReady = HasDueVisit() && Profile.Cells.Any(c => Profile.Batch!.Cells.Contains(c.Id) && c.Enabled && Due(c)
-                && GardenPolicy.CanVisit(c, stock, CurrentSoil));
+                && ReadyForVisit(c));
             var withdrawals = supplies.Where(p => stock.GetValueOrDefault(p.Key) is { Retainer: > 0 } s && s.Inventory < p.Value)
                 .Select(p => new { ItemId = p.Key, TargetCount = p.Value }).ToArray();
             var supply = supplies.Where(p => !visitReady && stock.GetValueOrDefault(p.Key) is { CanProcureNow: true } s && s.Inventory < p.Value)
@@ -156,7 +156,7 @@ internal sealed partial class HarvestService : IDisposable
                 Supply = supply,
                 Detail = Profile.Batch == null ? (error.Length > 0 ? error : "필요한 재배 없음")
                     : !ready && supplies.Any(p => stock.GetValueOrDefault(p.Key)?.Inventory < p.Value)
-                        ? "재배 재료 확보 조건 대기 · 다른 작업 진행" : catalog.Names.GetValueOrDefault(Profile.Batch.Output) ?? "재배",
+                        ? "재배 재료 확보 조건 대기 · 다른 작업 진행" : (!ready ? "성장·다음 관리 대기 · " : "") + (catalog.Names.GetValueOrDefault(Profile.Batch.Output) ?? "재배"),
                 Goals = Profile.Goals, BookItems = Profile.BookItems, Growable = catalog.Crops.Keys,
                 Searchable = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         } catch (Exception ex) {
@@ -315,19 +315,28 @@ internal sealed partial class HarvestService : IDisposable
             && Profile.BookItems.All(i => books.GetValueOrDefault(i) <= stock.GetValueOrDefault(i)?.Total)) return false;
         return Profile.Cells.Any(c => batch.Cells.Contains(c.Id) && c.Enabled && Due(c));
     }
-    private bool HasCareDue() => Profile.Cells.Any(c => c.Enabled && c.Owned && c.State == "growing" && c.RetryAt <= DateTime.UtcNow
+    private bool HasCareDue() => Profile.Cells.Any(c => c.Enabled && c.Owned && c.State is "growing" or "mature" && c.RetryAt <= DateTime.UtcNow
         && (c.Pending == "Tend" || c.Tended.AddHours(12) <= DateTime.UtcNow));
+    private bool CanHarvest(GardenCell cell) => cell.Owned && Profile.Batch is { } batch && !GardenPolicy.IsAnchor(batch, cell)
+        && (!batch.Cross || batch.Clearing || Profile.Cells.Any(c => batch.Cells.Contains(c.Id) && c.Id != cell.Id && c.Owned && c.State != "empty"));
+    private bool MaturityDue(GardenCell c) => catalog != null && catalog.SeedCrops.TryGetValue(c.Seed, out var item)
+        && catalog.Crops.TryGetValue(item, out var crop) && crop.Hours > 0 && c.Planted != DateTime.MinValue
+        && c.Planted.AddHours(crop.Hours) <= DateTime.UtcNow && c.Observed.AddMinutes(30) <= DateTime.UtcNow;
+    private bool ReadyForVisit(GardenCell c)
+    {
+        if (!GardenPolicy.CanVisit(c, stock, CurrentSoil, GardenPolicy.PlantingReady(Profile.Batch!, Profile.Cells, stock, CurrentSoil, supplies))) return false;
+        if (c.Pending.Length > 0 || !c.Owned || c.Observed == DateTime.MinValue || c.State == "mature"
+            || c.Tended.AddHours(12) <= DateTime.UtcNow || MaturityDue(c)) return true;
+        return c.ColorStep < Colors(c).Length && stock.GetValueOrDefault(Colors(c)[c.ColorStep])?.Inventory > 0;
+    }
     private bool Due(GardenCell c) => c.RetryAt <= DateTime.UtcNow
-        && !(c.Observed != DateTime.MinValue && c.State == "mature" && Profile.Batch is { } batch && GardenPolicy.IsAnchor(batch, c) && c.Pending.Length == 0)
-        && (c.Pending.Length > 0 || c.Observed == DateTime.MinValue
-        || c.State == "mature" || c.State == "empty" && Profile.Batch?.Clearing != true
-        || c.Owned && c.Tended.AddHours(12) <= DateTime.UtcNow
-        || c.Owned && catalog!.Crops.TryGetValue(Profile.Batch!.Output, out var crop)
-            && (c.ColorStep < crop.Colors.Length && c.ColorFed.AddHours(1) <= DateTime.UtcNow
-                || c.Planted != DateTime.MinValue && crop.Hours > 0 && c.Planted.AddHours(crop.Hours) <= DateTime.UtcNow
-                    && c.Observed.AddMinutes(30) <= DateTime.UtcNow)
-        || c.Owned && catalog!.SeedCrops.TryGetValue(c.Seed, out var baseCrop) && catalog.Crops.TryGetValue(baseCrop, out var growing)
-            && growing.Hours > 0 && c.Planted.AddHours(growing.Hours) <= DateTime.UtcNow && c.Observed.AddMinutes(30) <= DateTime.UtcNow);
+        && !(c.Pending.Length == 0 && c.Observed != DateTime.MinValue && c.State == "withered")
+        && !(c.Observed != DateTime.MinValue && c.State == "mature" && !CanHarvest(c)
+            && c.Pending.Length == 0 && c.Tended.AddHours(12) > DateTime.UtcNow)
+        && (c.Pending.Length > 0 || c.Observed == DateTime.MinValue || c.Owned && c.State == "mature"
+            || c.State == "empty" && Profile.Batch?.Clearing != true
+            || c.Owned && (c.Tended.AddHours(12) <= DateTime.UtcNow || MaturityDue(c)
+                || c.ColorStep < Colors(c).Length && c.ColorFed.AddHours(1) <= DateTime.UtcNow));
 
     public void Dispose()
     {

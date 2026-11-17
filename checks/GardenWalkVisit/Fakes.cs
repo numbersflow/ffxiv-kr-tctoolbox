@@ -28,6 +28,7 @@ namespace Harvest.Planning {
   internal void TeleportFinished()=>work.TravelAt=DateTime.UtcNow.AddSeconds(-2);
   internal void RemoveRoute()=>Profile.WalkRoutes.Clear();
   internal void ArrivalTimedOut()=>work.ArrivalCheckAt=DateTime.UtcNow.AddSeconds(-11);
+  internal void MarkFailed()=>work.FailedRoutes.Add(Profile.WalkRoutes.Keys.First());
   internal bool Finished=>work.WalkedRoutes.Contains("밭");
  }
 }

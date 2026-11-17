@@ -240,6 +240,9 @@ var manualCell=new GardenCell {Owned=true,Crop=17548,Observed=DateTime.UtcNow,Re
 var stockBefore=new Dictionary<uint,Stock>{[17548]=new(0,5,false)};
 Check(!GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,0,false)}),"Retainer withdrawal does not pretend a crop was harvested");
 Check(GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,5,false)}) && manualCell.Owned && manualCell.Observed==DateTime.MinValue && manualCell.RetryAt==DateTime.MinValue,"Manual harvest updates stock and requests real slot observation without guessing an empty cell");
+manualCell.Owned=false;manualCell.Observed=DateTime.UtcNow;
+Check(GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,5,false)}) && !manualCell.Owned,"Manual clearing of a foreign crop requests observation without claiming crop ownership");
+manualCell.Owned=true;
 manualCell.Pending="Harvest";manualCell.Observed=DateTime.UtcNow;
 Check(!GardenPolicy.InvalidateHarvestedCells([manualCell],stockBefore,new Dictionary<uint,Stock>{[17548]=new(5,5,false)}) && manualCell.Pending=="Harvest","Uncertain harvests retain reconciliation ownership");
 var reservedCells=Enumerable.Range(0,8).Select(i=>new GardenCell {Index=i}).ToArray();
@@ -262,7 +265,7 @@ Check(!GardenPolicy.LimitOrdinaryBatch(reservedBatch,reservedCells,2,0) && reser
     bool DueVisit()=>(bool)typeof(HarvestService).GetMethod("HasDueVisit",flags)!.Invoke(service,null)!;
     Check(DueVisit(),"Meeting the reduced goal must not abandon already planted owned crops");
     p.Batch!.Cross=true;p.Batch.Clearing=false;p.Batch.Cells=["other",owned.Id];
-    owned.State="mature";owned.Observed=DateTime.UtcNow;
+    owned.State="mature";owned.Observed=DateTime.UtcNow;owned.Tended=DateTime.UtcNow;
     bool DueAnchor()=>(bool)typeof(HarvestService).GetMethod("Due",flags)!.Invoke(service,[owned])!;
     Check(!DueAnchor(),"A confirmed mature crossing anchor is preserved");
     owned.Observed=DateTime.MinValue;

@@ -45,4 +45,7 @@ Check(service.Run(cell),"A delayed arrival keeps the same cell pending");
 var recoverRequests=Svc.PluginInterface.HomeRequests;var recoverMoves=Svc.PluginInterface.Moves;
 Svc.Objects.LocalPlayer.Position=Vector3.Zero;
 Check(service.Run(cell) && Svc.PluginInterface.HomeRequests==recoverRequests && Svc.PluginInterface.Moves==recoverMoves+1,"Once arrival information settles, the same visit starts the saved walk without another teleport or skipped cell");
+service=new HarvestService(route);service.MarkFailed();var failedHomeRequests=Svc.PluginInterface.HomeRequests;
+try{service.Run(cell);throw new Exception("A failed group restarted travel");}catch(InvalidOperationException){checks++;}
+Check(Svc.PluginInterface.HomeRequests==failedHomeRequests,"A failed route cannot teleport again for another cell during the same visit");
 Console.WriteLine($"PASS {checks} actual garden walk visit checks; no native game actions executed.");

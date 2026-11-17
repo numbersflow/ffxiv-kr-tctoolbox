@@ -8,12 +8,21 @@ public static class GardenPolicy
 {
     public static uint Soil(bool cross, uint crossingSoil) => cross ? crossingSoil : 16026u;
 
-    public static bool CanVisit(GardenCell cell, IReadOnlyDictionary<uint, Stock> stock, uint soil) =>
+    public static bool CanVisit(GardenCell cell, IReadOnlyDictionary<uint, Stock> stock, uint soil, bool plantingReady = true) =>
         cell.Pending.Length > 0 || cell.Owned
-        || stock.GetValueOrDefault(cell.Seed)?.Inventory > 0 && stock.GetValueOrDefault(soil)?.Inventory > 0;
+        || plantingReady && stock.GetValueOrDefault(cell.Seed)?.Inventory > 0 && stock.GetValueOrDefault(soil)?.Inventory > 0;
     // The second cell stays planted, including when both parents use the same seed.
     public static bool IsAnchor(GardenBatch batch, GardenCell cell) =>
         batch.Cross && !batch.Clearing && batch.Cells.Count > 1 && batch.Cells[1] == cell.Id;
+
+    public static bool PlantingReady(GardenBatch batch, IEnumerable<GardenCell> cells, IReadOnlyDictionary<uint,Stock> stock, uint soil, IReadOnlyDictionary<uint,int>? materials = null)
+    {
+        if (batch.Clearing) return false;
+        var empty = cells.Where(c => c.Enabled && batch.Cells.Contains(c.Id) && !c.Owned && c.Pending.Length == 0).ToArray();
+        return (stock.GetValueOrDefault(soil)?.Inventory ?? 0) >= empty.Length
+            && empty.GroupBy(c => c.Seed).All(g => (stock.GetValueOrDefault(g.Key)?.Inventory ?? 0) >= g.Count())
+            && (materials == null || materials.All(p => (stock.GetValueOrDefault(p.Key)?.Inventory ?? 0) >= p.Value));
+    }
 
     public static int PlantingCells(int required, int owned, int yield)
     {
@@ -36,7 +45,7 @@ public static class GardenPolicy
     public static bool InvalidateHarvestedCells(IEnumerable<GardenCell> cells, IReadOnlyDictionary<uint, Stock> before, IReadOnlyDictionary<uint, Stock> after)
     {
         var changed = false;
-        foreach (var cell in cells.Where(c => c.Owned && c.Pending.Length == 0 && c.Crop != 0)) {
+        foreach (var cell in cells.Where(c => c.Pending.Length == 0 && c.Crop != 0)) {
             if (!before.TryGetValue(cell.Crop, out var previous) || !after.TryGetValue(cell.Crop, out var current)
                 || current.Inventory <= previous.Inventory || current.Total <= previous.Total) continue;
             // Inventory gains cannot identify the emptied slot; verify each matching crop in game.
