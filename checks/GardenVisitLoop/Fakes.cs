@@ -102,6 +102,7 @@ namespace Harvest.Planning {
         public void Cancel()=>work.Stop();public void Pause(bool paused)=>work.Pause!(paused,false);
         public bool GardenBusy {get=>garden.IsBusy;set=>garden.IsBusy=value;}
         public Dictionary<uint,int> Supplies=>supplies;
+        public string Error=>error;
         public bool CachedReady=>JsonDocument.Parse(snapshot).RootElement.GetProperty("Ready").GetBoolean();
         private static int FreeSlots()=>Current.Free;
         private int HarvestSlots(GardenCell cell)=>1;

@@ -117,4 +117,7 @@ run.Catalog.Crops[400]=new(400,401,"other outdoor crop",false,24,[]);run.Catalog
 run.Profile.Goals.Add(new(){Item=400,Quantity=2});run.Inventory[401]=2;run.Initialize();
 Check(run.Profile.ActiveBatches.Count()==3 && run.Profile.Cells.Skip(4).All(c=>run.Profile.BatchFor(c)==null),
     "A crossing bed cannot take an unrelated neighboring planting that could contaminate its seed result");
+run=Parallel();run.Catalog.Crops[500]=new(500,501,"waiting flower",true,24,[]);run.Catalog.SeedCrops[501]=500;
+run.Profile.Goals.Add(new(){Item=500,Quantity=1});run.Inventory[501]=1;run.Initialize();
+Check(run.Error.Length==0 && run.Profile.ActiveBatches.Count()==3,"Waiting for occupied pots must not report that indoor pots are unregistered");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

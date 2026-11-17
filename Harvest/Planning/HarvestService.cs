@@ -290,7 +290,10 @@ internal sealed partial class HarvestService : IDisposable
                 selected = Profile.Cells.Where(c => c.Kind == "plot" && Available(c, true))
                     .GroupBy(c => (c.Group, c.House, c.World, c.Territory, c.X, c.Y, c.Z)).SelectMany(g => g.SelectMany(a => g.Where(b => (a.Index + 1) % 8 == b.Index)
                         .Select(b => new[] { a, b }))).FirstOrDefault() ?? [];
-                if (selected.Length != 2) { error = "교배할 같은 텃밭의 인접한 재배 칸 2개를 등록·선택해야 합니다."; continue; }
+                if (selected.Length != 2) {
+                    if (Profile.Cells.Count(c => c.Enabled && c.Kind == "plot") < 2) error = "교배할 같은 텃밭의 인접한 재배 칸 2개를 등록·선택해야 합니다.";
+                    continue;
+                }
                 next = new() { Goal = item, Output = stage.Output, Required = stage.Required,
                     SeedA = stage.A, SeedB = stage.B, Cross = true, Cells = selected.Select(c => c.Id).ToList() };
             } else if (isSeed) {
@@ -302,7 +305,8 @@ internal sealed partial class HarvestService : IDisposable
                     .OrderBy(c => c.Kind == "pot" ? 0 : 1).Take(Math.Min(GardenPolicy.PlantingCells(quantity, stock.GetValueOrDefault(item)?.Total ?? 0, product!.Yield),
                         stock.GetValueOrDefault(seed) is { CanProcure: false } held ? Math.Min(24, held.Total) : 24)).ToArray();
                 if (selected.Length == 0) {
-                    error = product!.Flower ? "꽃을 재배할 실내 화분 칸을 등록·선택해야 합니다." : "재배할 칸을 등록·선택해야 합니다.";
+                    if (!Profile.Cells.Any(c => c.Enabled && (!product!.Flower || c.Kind == "pot")))
+                        error = product!.Flower ? "꽃을 재배할 실내 화분 칸을 등록·선택해야 합니다." : "재배할 칸을 등록·선택해야 합니다.";
                     continue;
                 }
                 next = new() { Goal = item, Output = item, Required = quantity, SeedA = seed, Cells = selected.Select(c => c.Id).ToList() };
