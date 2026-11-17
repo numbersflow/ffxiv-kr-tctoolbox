@@ -73,7 +73,10 @@ internal sealed partial class HarvestService
                 var batch = Profile.Batch;
                 var waiting = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true
                     && !work.Done.Contains(c.Id) && !c.Owned && c.Pending.Length == 0 && Due(c)).ToArray();
-                if (waiting.Length > 0) ReadVisitInventory(waiting.Select(c => c.Seed).Append(CurrentSoil).Where(i => i > 0));
+                if (waiting.Length > 0) {
+                    try { ReadVisitInventory(waiting.Select(c => c.Seed).Append(CurrentSoil).Where(i => i > 0)); }
+                    catch (Exception ex) { work.Phase = "재고 재확인 대기 · " + ex.Message; return End(work, "Partial"); }
+                }
                 work.Cell = Profile.Cells.Where(c => c.Enabled && batch?.Cells.Contains(c.Id) == true && !work.Done.Contains(c.Id) && Due(c))
                     .Where(c => GardenPolicy.CanVisit(c, stock, CurrentSoil))
                     .OrderBy(c => c.Owned || c.Pending.Length > 0 ? 0 : 1).FirstOrDefault();
