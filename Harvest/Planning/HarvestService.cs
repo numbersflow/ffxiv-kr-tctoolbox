@@ -139,8 +139,11 @@ internal sealed partial class HarvestService : IDisposable
             Replan();
             var visitReady = HasDueVisit() && Profile.Cells.Any(c => Profile.Batch!.Cells.Contains(c.Id) && c.Enabled && Due(c)
                 && GardenPolicy.CanVisit(c, stock, CurrentSoil));
+            var withdrawals = supplies.Where(p => stock.GetValueOrDefault(p.Key) is { Retainer: > 0 } s && s.Inventory < p.Value)
+                .Select(p => new { ItemId = p.Key, TargetCount = p.Value }).ToArray();
             var supply = supplies.Where(p => !visitReady && stock.GetValueOrDefault(p.Key) is { CanProcureNow: true } s && s.Inventory < p.Value)
-                .Select(p => new { ItemId = p.Key, TargetCount = p.Value }).FirstOrDefault();
+                .OrderByDescending(p => stock[p.Key].Retainer > 0)
+                .Select(p => new { ItemId = p.Key, TargetCount = p.Value, Withdrawals = withdrawals }).FirstOrDefault();
             var ready = Profile.RetryAt <= DateTime.UtcNow && (supply != null || visitReady);
             snapshot = JsonSerializer.Serialize(new { Available = true, Character = owner, Ready = ready,
                 Supply = supply,
