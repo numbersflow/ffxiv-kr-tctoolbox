@@ -106,26 +106,31 @@ internal sealed partial class HarvestService
             if (DateTime.UtcNow - work.StepAt > TimeSpan.FromMinutes(3)) throw new InvalidOperationException("시설 접근·조작 시간 초과");
             work.CheckingArrival = true;
             if (WalkingRouteInProgress(work, cell, out var routePhase)) return Busy(work, routePhase);
+            if (Svc.Condition[ConditionFlag.BetweenAreas] || Svc.Condition[ConditionFlag.BetweenAreas51])
+                return Busy(work, "구역 이동 종료 대기");
             if (!AtCell(cell)) {
                 throw new InvalidOperationException("개인주택 텔레포트 결과가 등록한 재배 시설의 위치와 다릅니다.");
             }
             work.CheckingArrival = false;
             work.Travel = false;
+            if (!IsGardenHousingLoaded()) return Busy(work, "주택 로딩 완료 대기");
             if (work.Object == 0) {
                 var patches = NearbyPatches();
                 var candidates = patches.Where(p => GardenRegistration.Matches(cell, p)).ToArray();
                 // Housing identity can settle before the targetable garden objects load.
-                if (candidates.Length == 0) {
-                    var now = DateTime.UtcNow;
-                    if (work.PatchWaitAt == DateTime.MinValue) work.PatchWaitAt = now;
-                    if (now - work.PatchWaitAt < TimeSpan.FromSeconds(10)) return Busy(work, "등록 재배 칸 로딩 대기");
-                }
+                if (candidates.Length == 0 && CanWaitForPatch(work)) return Busy(work, "등록 재배 칸 로딩 대기");
                 if (candidates.Length != 1 || candidates[0].InstanceKey != cell.LayoutInstanceKey)
                     Svc.Log.Information($"Garden patch identity: expected={cell.LayoutInstanceKey}:{cell.LayoutSubId} at {cell.Position}, matches={candidates.Length}, nearby={string.Join(';', patches.Select(p => $"{p.InstanceKey}:{p.SubId}@{p.Origin}"))}");
                 if (candidates.Length != 1) throw new InvalidOperationException("등록 시설의 칸을 유일하게 식별할 수 없습니다.");
                 work.Object = candidates[0].Object;
             }
-            if (garden.GetPatchDistance(work.Object) > AutoGardensWork.InteractRange) {
+            var distance = garden.GetPatchDistance(work.Object);
+            if (distance < 0) {
+                work.Object = 0; work.Scanning = false;
+                if (CanWaitForPatch(work)) return Busy(work, "등록 재배 칸 다시 확인 중");
+                throw new InvalidOperationException("등록한 재배 칸이 다시 표시되지 않습니다.");
+            }
+            if (distance > AutoGardensWork.InteractRange) {
                 if (work.Move) {
                     if (ExternalNav.IsVnavmeshPathRunning() || ExternalNav.IsVnavmeshPathfindInProgress()) return Busy(work, "시설 접근");
                     throw new InvalidOperationException("시설 접근이 상호작용 범위에 도달하지 못했습니다.");
@@ -136,6 +141,11 @@ internal sealed partial class HarvestService
                 work.Move = true; return Busy(work, "시설 접근 시작");
             }
             if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
+            if (!IsGardenTargetable(work.Object) || AutomationGate.TryGetBusyReason(out _)) {
+                if (CanWaitForPatch(work)) return Busy(work, "재배 칸 상호작용 가능 상태 대기");
+                throw new InvalidOperationException("재배 칸 또는 캐릭터가 상호작용 가능 상태가 아닙니다.");
+            }
+            work.PatchWaitAt = DateTime.MinValue;
             if (!work.Scanning) {
                 if (work.Verifying) work.CommandConfirmed = garden.DoneCount > 0 && garden.SkippedCount == 0;
                 work.ScanAt = DateTime.UtcNow;
@@ -296,6 +306,21 @@ internal sealed partial class HarvestService
             if (stock.TryGetValue(id, out var previous)) stock[id] = previous with { Inventory = count };
         return counts;
     }
+    private static bool CanWaitForPatch(Visit work)
+    {
+        var now = DateTime.UtcNow;
+        if (work.PatchWaitAt == DateTime.MinValue) work.PatchWaitAt = now;
+        return now - work.PatchWaitAt < TimeSpan.FromSeconds(10);
+    }
+
+    private static unsafe bool IsGardenHousingLoaded()
+    {
+        var housing = HousingManager.Instance();
+        return housing != null && housing->CurrentTerritory != null && housing->CurrentTerritory->IsLoaded();
+    }
+
+    private static bool IsGardenTargetable(ulong id) => Svc.Objects.SearchById(id)?.IsTargetable == true;
+
     private static unsafe int FreeSlots()
     {
         var manager = InventoryManager.Instance();

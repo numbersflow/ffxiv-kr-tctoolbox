@@ -404,4 +404,16 @@ Check(result.Result=="Partial" && run.Teleports==1 && run.Calls.Count==0 && run.
     "A genuinely missing pot ends with a bounded retry instead of blocking other work or teleporting again");
 run=Ordinary(flower:true);run.PatchListLoading=true;run.Start();run.Tick();run.Tick();run.Cancel();result=run.Run();
 Check(result.Result=="Cancelled" && run.Calls.Count==0,"A timed opportunity can still cancel while a pot is loading");
+run=Ordinary(flower:true);run.HousingLoaded=false;run.Start();run.Tick();result=run.Tick();
+Check(result.Busy && run.Seen.Count==0 && run.Calls.Count==0 && run.Profile.Cells[0].Error.Length==0,
+    "A loaded-looking pot is not touched until the game reports that housing has loaded");
+run.HousingLoaded=true;run.PatchTargetable=false;result=run.Tick();
+Check(result.Busy && run.Seen.Count==0 && run.Calls.Count==0 && run.Profile.Cells[0].Pending.Length==0,
+    "A unique but untargetable pot cannot start a scan or reserve a mutation receipt");
+run.PatchTargetable=true;result=run.Run();
+Check(result.Result=="Succeeded" && run.Teleports==1 && run.Calls.Count(c=>c.Action=="Plant")==1,
+    "The same visit starts as soon as the pot is targetable, without an extra hold or teleport");
+run=Ordinary(flower:true);run.PatchTargetable=false;run.Start();run.Tick();run.Tick();run.ExpirePatchWait();result=run.Run();
+Check(result.Result=="Partial" && run.Calls.Count==0 && run.Teleports==1,
+    "A persistently untargetable pot has a bounded failure and never issues a crop action");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

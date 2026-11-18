@@ -122,6 +122,9 @@ namespace Harvest.Planning {
         private int HarvestSlots(GardenCell cell)=>1;
         private static bool AtCell(GardenCell cell)=>true;
         public bool PatchListLoading;
+        public bool HousingLoaded=true, PatchTargetable=true;
+        private bool IsGardenHousingLoaded()=>HousingLoaded;
+        private bool IsGardenTargetable(ulong id)=>PatchTargetable;
         public void ExpirePatchWait()=>visit!.PatchWaitAt=DateTime.UtcNow.AddSeconds(-11);
         private GardenPatch[] NearbyPatches()=>PatchListLoading?[]:Profile.Cells.Select(c=>new GardenPatch((ulong)c.Index+1,c.Kind,1,(uint)c.Index,c.Position,c.Position)).ToArray();
         public string FailArrivalKind="";
