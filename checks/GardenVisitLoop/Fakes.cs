@@ -121,7 +121,9 @@ namespace Harvest.Planning {
         private static int FreeSlots()=>Current.Free;
         private int HarvestSlots(GardenCell cell)=>1;
         private static bool AtCell(GardenCell cell)=>true;
-        private GardenPatch[] NearbyPatches()=>Profile.Cells.Select(c=>new GardenPatch((ulong)c.Index+1,c.Kind,1,(uint)c.Index,c.Position,c.Position)).ToArray();
+        public bool PatchListLoading;
+        public void ExpirePatchWait()=>visit!.PatchWaitAt=DateTime.UtcNow.AddSeconds(-11);
+        private GardenPatch[] NearbyPatches()=>PatchListLoading?[]:Profile.Cells.Select(c=>new GardenPatch((ulong)c.Index+1,c.Kind,1,(uint)c.Index,c.Position,c.Position)).ToArray();
         public string FailArrivalKind="";
         private bool WalkingRouteInProgress(Visit run,GardenCell cell,out string phase){phase="teleport";var location=GardenPolicy.FacilityKey(cell);if(currentLocation!=location){Teleports++;currentLocation=location;return true;}if(cell.Kind==FailArrivalKind)throw new InvalidOperationException("Wrong house");return false;}
     }

@@ -25,7 +25,7 @@ internal sealed partial class HarvestService
         public HashSet<string> FailedRoutes = [];
         public int ReservedSlots = 8;
         public DateTime Started = DateTime.UtcNow, StepAt = DateTime.UtcNow, ScanAt, TravelAt, ArrivalCheckAt;
-        public DateTime PauseAt, StockWaitAt;
+        public DateTime PauseAt, StockWaitAt, PatchWaitAt;
         public string LastFacility = "";
         public string Phase = "준비";
         public HashSet<string> Done = [], Acted = [], Tended = [];
@@ -63,6 +63,7 @@ internal sealed partial class HarvestService
                     var elapsed = DateTime.UtcNow - work.PauseAt;
                     work.StepAt += elapsed;
                     if (work.StockWaitAt != DateTime.MinValue) work.StockWaitAt += elapsed;
+                    if (work.PatchWaitAt != DateTime.MinValue) work.PatchWaitAt += elapsed;
                 }
                 work.Paused = paused;
             },
@@ -113,6 +114,12 @@ internal sealed partial class HarvestService
             if (work.Object == 0) {
                 var patches = NearbyPatches();
                 var candidates = patches.Where(p => GardenRegistration.Matches(cell, p)).ToArray();
+                // Housing identity can settle before the targetable garden objects load.
+                if (candidates.Length == 0) {
+                    var now = DateTime.UtcNow;
+                    if (work.PatchWaitAt == DateTime.MinValue) work.PatchWaitAt = now;
+                    if (now - work.PatchWaitAt < TimeSpan.FromSeconds(10)) return Busy(work, "등록 재배 칸 로딩 대기");
+                }
                 if (candidates.Length != 1 || candidates[0].InstanceKey != cell.LayoutInstanceKey)
                     Svc.Log.Information($"Garden patch identity: expected={cell.LayoutInstanceKey}:{cell.LayoutSubId} at {cell.Position}, matches={candidates.Length}, nearby={string.Join(';', patches.Select(p => $"{p.InstanceKey}:{p.SubId}@{p.Origin}"))}");
                 if (candidates.Length != 1) throw new InvalidOperationException("등록 시설의 칸을 유일하게 식별할 수 없습니다.");
@@ -350,7 +357,7 @@ internal sealed partial class HarvestService
             work.Done.Add(work.Cell.Id);
             if (work.Cell.Error.Length == 0) work.LastFacility = GardenPolicy.FacilityKey(work.Cell);
         }
-        work.Cell = null; work.Object = 0; work.Scanning = false; work.Verifying = false;
+        work.Cell = null; work.Object = 0; work.PatchWaitAt = DateTime.MinValue; work.Scanning = false; work.Verifying = false;
     }
     private AutomationObservation Busy(Visit work, string phase)
     {

@@ -393,4 +393,15 @@ Check(run.Start() && run.Run().Result=="Partial" && run.Teleports==1 && run.Call
     "A failed home entrance rejects the shared indoor facility after a single teleport and no crop interactions");
 Check(potA.RetryAt > DateTime.UtcNow.AddMinutes(4) && potB.RetryAt==potA.RetryAt && !run.Ready(),
     "Both pots share the same arrival cooldown across visits instead of dispatching another immediate teleport");
+run=Ordinary(flower:true);run.PatchListLoading=true;run.Start();run.Tick();result=run.Tick();
+Check(result.Busy && run.Profile.Cells[0].Error.Length==0 && run.Calls.Count==0,
+    "A temporarily empty patch list after arrival keeps the owned garden visit alive without starting any action");
+run.PatchListLoading=false;result=run.Run();
+Check(result.Result=="Succeeded" && run.Teleports==1 && run.Calls.Count(c=>c.Action=="Plant")==1,
+    "A late-loading indoor pot is planted during the same visit without another teleport");
+run=Ordinary(flower:true);run.PatchListLoading=true;run.Start();run.Tick();run.Tick();run.ExpirePatchWait();result=run.Run();
+Check(result.Result=="Partial" && run.Teleports==1 && run.Calls.Count==0 && run.Profile.Cells[0].RetryAt>DateTime.UtcNow,
+    "A genuinely missing pot ends with a bounded retry instead of blocking other work or teleporting again");
+run=Ordinary(flower:true);run.PatchListLoading=true;run.Start();run.Tick();run.Tick();run.Cancel();result=run.Run();
+Check(result.Result=="Cancelled" && run.Calls.Count==0,"A timed opportunity can still cancel while a pot is loading");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");
