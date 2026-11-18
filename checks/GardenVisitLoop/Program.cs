@@ -282,4 +282,106 @@ Check(result.Result=="Succeeded" && run.Inventory[31]==1 && run.Calls.All(c=>c.I
 run=Crossing(existing:true);run.Profile.Cells[0].Enabled=false;run.Initialize();run.Start();result=run.Run();
 Check(result.Result=="Succeeded" && run.Profile.Cells[0].Owned && run.Calls.All(c=>c.Id!=1) && !run.Ready(),
     "Disabling a parent preserves its crop record and cannot leave a perpetual actionable crossing or block the other parent's harvest");
+VisitDriver Layout(int count, params int[] empty) {
+    var d=Crossing(); d.Profile.SetBatches([]);
+    d.Profile.Cells=Enumerable.Range(0,count).Select(i=>new GardenCell{Index=i,State=empty.Contains(i)?"empty":"growing",
+        Crop=empty.Contains(i)?0u:999u,Observed=DateTime.UtcNow}).ToList();
+    return d;
+}
+run=Layout(4,0,3);foreach(var c in run.Profile.Cells.Where(c=>c.Index is 1 or 2)){c.Crop=0;c.State="empty";c.Enabled=false;}run.Initialize();
+Check(run.Profile.Batch is {Cross:true} && run.Profile.Batch.Cells.Count==2,
+    "The last and first slots in a four-slot bed form a valid wraparound crossing pair");
+run=Layout(8,0,1,3,4,5,6);run.Initialize();
+Check(run.Profile.Batch is {Cross:true} && run.Profile.Batch.Cells.All(id=>run.Profile.Cells.Single(c=>c.Id==id).Index is 4 or 5),
+    "Choose an uncontaminated pair instead of reserving the first empty pair beside foreign crops");
+run=Layout(8);run.Initialize();
+Check(!run.Profile.ActiveBatches.Any() && run.Supplies.Count==0 && !run.Ready(),
+    "A full bed retains its goal without procurement or a busy visit and never takes over foreign crops");
+run.Profile.Cells.ForEach(c=>{c.Crop=0;c.State="empty";});run.Initialize();
+Check(run.Profile.Batch is {Cross:true} && run.Profile.Batch.Cells.Count==2,
+    "A waiting crossing automatically acquires a pair after space becomes available");
+run=Layout(8,0,2);run.Initialize();
+Check(!run.Profile.ActiveBatches.Any() && !run.Ready(),
+    "Two isolated empty cells are not treated as an adjacent crossing pair");
+run=Layout(8,0,1);run.Profile.Cells[7].Enabled=false;run.Initialize();
+Check(!run.Profile.ActiveBatches.Any(),
+    "A disabled foreign neighbor remains a physical blocker even though its management is disabled");
+run=Layout(8,0,1);run.Profile.Cells[7].X=20;run.Profile.Cells[7].Crop=0;run.Profile.Cells[7].State="empty";run.Initialize();
+Check(!run.Profile.ActiveBatches.Any(),
+    "An incomplete bed registration does not prove a safe crossing topology");
+
+VisitDriver Ladder(double ordinaryHours=48, bool reservedOrdinary=false) {
+    var d=new VisitDriver();
+    foreach(var (item,seed,hours) in new (uint,uint,double)[]{(10,11,24),(20,21,96),(30,31,24),(40,41,24),(50,51,24),(60,61,24),(70,71,24),(100,101,ordinaryHours)}) {
+        d.Catalog.Crops[item]=new(item,seed,"lookahead",false,hours,[]); d.Catalog.SeedCrops[seed]=item;
+    }
+    d.Catalog.Crosses=[new(31,11,21),new(41,31,51),new(61,41,71)];d.UnavailableSeeds=[31,41,61];
+    d.Inventory=new(){[11]=2,[21]=2,[51]=2,[71]=2,[101]=8,[7766]=8,[16026]=8};
+    d.Profile.Cells=Enumerable.Range(0,8).Select(i=>new GardenCell{Index=i,State="empty",Observed=DateTime.UtcNow}).ToList();
+    d.Profile.Goals=[new(){Item=100,Quantity=8},new(){Item=60,Quantity=1}];
+    if(reservedOrdinary){d.Profile.Batch=new(){Goal=100,Output=100,SeedA=101,Required=8,Cells=d.Profile.Cells.Select(c=>c.Id).ToList()};foreach(var c in d.Profile.Cells)c.Seed=101;}
+    d.Initialize();return d;
+}
+run=Ladder();
+Check(run.Profile.Batch is {Cross:true,Output:31} && run.Profile.ActiveBatches.Where(b=>!b.Cross).Sum(b=>b.Cells.Count)<6,
+    "A later-selected three-stage crossing gets the bed before an earlier ordinary crop that would delay it");
+var forecastNow=DateTime.UtcNow;
+var ladderPlan=SeedPlanner.Build(61,1,run.Catalog.SeedCrops.Keys.ToDictionary(id=>id,id=>new Stock(run.Inventory.GetValueOrDefault(id),0,!run.UnavailableSeeds.Contains(id))),run.Catalog.Crosses);
+var ladderForecast=GardenLookahead.Build(run.Profile,run.Catalog.Crops,run.Catalog.SeedCrops,[ladderPlan],forecastNow);
+Check(ladderForecast.Select(r=>r.Output).SequenceEqual(new uint[]{31,41,61}),
+    "The forecast allocates actual adjacent pairs for the current, next and next-next crossing stages");
+Check(ladderForecast.All(r=>r.Pair is var pair
+    && GardenPolicy.AdjacentSlots(pair[0],pair[1],run.Profile.Cells)),"Every future crossing uses proven same-bed adjacency");
+Check(ladderForecast.Single(r=>r.Output==41).PlantAt>=forecastNow.AddHours(24)
+    && ladderForecast.Single(r=>r.Output==61).PlantAt>=forecastNow.AddHours(48),
+    "Future stages cannot start before their ancestor seeds can first be harvested");
+run=Ladder(12);
+Check(run.Profile.ActiveBatches.Single(b=>!b.Cross).Cells.Count==4,
+    "Short ordinary crops use future-stage cells while still leaving current crossing parents and neighbors clear");
+var oldIds=run.Profile.Cells.Select(c=>c.Id).ToArray();run.Initialize();
+Check(run.Profile.Cells.Select(c=>c.Id).SequenceEqual(oldIds) && run.Profile.ActiveBatches.Single(b=>!b.Cross).Cells.Count==4,
+    "Replanning the same forecast is stable and does not duplicate or lose cell registrations");
+run=Ladder(reservedOrdinary:true);
+Check(run.Profile.Batch is {Cross:true} && run.Profile.ActiveBatches.Where(b=>!b.Cross).Sum(b=>b.Cells.Count)<6,
+    "Unplanted ordinary reservations yield to a newly selected crossing before seeds or soil are spent");
+run=Ladder();run.Profile.Goals.RemoveAll(g=>g.Item==60);run.Initialize();
+Check(run.Profile.ActiveBatches.Single().Cross==false && run.Profile.Batch!.Cells.Count==8,
+    "Removing a crossing goal releases its unplanted current and future reservations for ordinary production");
+run=Ladder();run.Inventory[61]=1;run.Initialize();
+Check(run.Profile.ActiveBatches.All(b=>!b.Cross),
+    "An externally obtained final seed removes obsolete ancestor crossings rather than following a stale forecast");
+run=Ladder();run.Profile.Cells.ForEach(c=>{c.Seed=101;c.Crop=100;c.Owned=true;c.State="growing";c.Planted=DateTime.UtcNow;c.Tended=DateTime.UtcNow;});
+run.Profile.SetBatches([new(){Goal=100,Output=100,SeedA=101,Required=8,Cells=run.Profile.Cells.Select(c=>c.Id).ToList()}]);run.Initialize();
+Check(run.Profile.Cells.All(c=>c.Owned&&c.Seed==101) && !run.Profile.ActiveBatches.Any(b=>b.Cross) && !run.Ready(),
+    "An urgent crossing waits for already planted ordinary crops instead of discarding them or spinning the workflow");
+run=Ladder();run.Catalog.Crops[10]=run.Catalog.Crops[10] with{Hours=0};run.Initialize();
+var unknownPlan=SeedPlanner.Build(61,1,run.Catalog.SeedCrops.Keys.ToDictionary(id=>id,id=>new Stock(run.Inventory.GetValueOrDefault(id),0,!run.UnavailableSeeds.Contains(id))),run.Catalog.Crosses);
+var unknownForecast=GardenLookahead.Build(run.Profile,run.Catalog.Crops,run.Catalog.SeedCrops,[unknownPlan],DateTime.UtcNow);
+Check(!unknownForecast.Any(r=>r.Output==41),
+    "Unknown parent growth time cannot invent a future-stage start or promise a borrowing window");
+run=Ladder();run.Profile.Goals.RemoveAll(g=>g.Item==100);
+run.Inventory[11]=1;run.Inventory[21]=1;run.UnavailableSeeds.UnionWith([11u,21u]);run.Initialize();
+Check(run.Start(),"A planned crossing starts with one of each non-procurable parent seed");
+run.Run();
+Check(run.Inventory[11]==0 && run.Inventory[21]==0 && run.Profile.Batch is { Cross:true, Output:31 },
+    "Consuming both parent seeds keeps the verified growing stage relevant to its descendants");
+foreach(var (output,reward) in new (uint,uint)[]{(31,31),(41,41),(61,61)}) {
+    var stage=run.Profile.ActiveBatches.Single(b=>b.Cross && !b.Clearing);
+    var producingCell=run.Profile.Cells.Single(c=>c.Id==stage.Cells[0]);
+    var patchId=(ulong)producingCell.Index+1;
+    Check(stage.Output==output && stage.Cells.All(id=>run.Profile.Cells.Single(c=>c.Id==id).Owned),
+        "The expected ancestor and both its parents are planted before its harvest");
+    producingCell.State="mature";
+    run.Patches[patchId]=(Harvest.Core.PatchState.Ripe,producingCell.Crop);
+    run.Rewards[patchId]=new(){[reward]=1};
+    run.Initialize();
+    Check(run.Start() && run.Run().Result=="Succeeded", "Each verified harvest advances the ladder in the same visit");
+}
+Check(run.Profile.ActiveBatches.Any(b=>!b.Cross && b.Goal==60 && b.Cells.All(id=>run.Profile.Cells.Single(c=>c.Id==id).Owned)),
+    "After three crossed seed receipts, the final goal crop is planted and previous parents are preserved until harvest");
+run=Layout(8,0,1,3,4,5,6);var waitingCell=run.Profile.Cells[7];
+waitingCell.Owned=true;waitingCell.Seed=21;waitingCell.Crop=20;waitingCell.State="mature";
+run.Profile.AdditionalBatches.Add(new(){Goal=20,Output=20,SeedA=21,Clearing=true,Cells=[waitingCell.Id]});run.Initialize();
+Check(run.Profile.ActiveBatches.Single(b=>b.Cross).Cells.All(id=>run.Profile.Cells.Single(c=>c.Id==id).Index is 4 or 5),
+    "A ready-to-harvest neighbor is still occupied, so a clear pair takes precedence immediately");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

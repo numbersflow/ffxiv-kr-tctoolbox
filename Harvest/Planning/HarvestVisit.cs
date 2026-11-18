@@ -95,6 +95,7 @@ internal sealed partial class HarvestService
                     .Where(c => CanVisit(c))
                     .OrderBy(c => VisitLocation(c) == work.LastFacility ? 0 : 1)
                     .ThenBy(c => c.Owned || c.Pending.Length > 0 ? 0 : 1)
+                    .ThenBy(c => Profile.BatchFor(c) is { Cross: true, Clearing: false } ? 0 : 1)
                     .ThenBy(c => !c.Owned && Profile.BatchFor(c) is { Cross: true } crossing && GardenPolicy.IsAnchor(crossing, c) ? 0 : 1).FirstOrDefault();
                 if (work.Cell == null) return End(work, work.Failed == 0 ? "Succeeded" : "Partial");
                 work.Plans.Add(Profile.BatchFor(work.Cell)!);

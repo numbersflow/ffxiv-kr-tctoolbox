@@ -37,6 +37,13 @@ public static class GardenPolicy
         return distance <= 1 || distance == indices.Count - 1;
     }
 
+    public static IEnumerable<GardenCell[]> CrossPairs(IReadOnlyCollection<GardenCell> cells) =>
+        cells.Where(c => c.Kind == "plot").GroupBy(c => (c.Group, c.House, c.World, c.Territory, c.X, c.Y, c.Z))
+            .Where(g => g.Count() is 2 or 4 or 8 && g.Select(c => c.Index).Distinct().Count() == g.Count()
+                && Enumerable.Range(0, g.Count()).All(i => g.Any(c => c.Index == i)))
+            .SelectMany(g => g.Where(c => c.Enabled).SelectMany(a => g.Where(b => b.Enabled && a.Index < b.Index
+                && AdjacentSlots(a, b, cells)).Select(b => new[] { a, b })));
+
     public static bool AlignCrossAnchor(GardenBatch batch, IEnumerable<GardenCell> cells, IReadOnlyDictionary<uint, Crop> crops, IReadOnlyDictionary<uint, uint> seeds)
     {
         if (!batch.Cross || batch.Clearing || batch.Cells.Count != 2) return false;

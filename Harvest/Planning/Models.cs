@@ -186,12 +186,19 @@ public sealed record SeedPlan(IReadOnlyList<SeedStage> Stages, IReadOnlyDictiona
 
 public static class SeedPlanner
 {
-    public static SeedPlan Build(uint seed, int required, IReadOnlyDictionary<uint, Stock> stock, IReadOnlyList<Cross> crosses)
+    public static SeedPlan Build(uint seed, int required, IReadOnlyDictionary<uint, Stock> stock, IReadOnlyList<Cross> crosses,
+        IReadOnlyDictionary<uint, Cross>? planted = null)
     {
         if (seed == 0 || required <= 0 || required > 999999) throw new ArgumentException("잘못된 씨앗 목표");
+        if (stock.TryGetValue(seed, out var current)) {
+            if (current.Total >= required) return new([], new Dictionary<uint, int>(), "");
+            if (current.CanProcure) return new([], new Dictionary<uint, int> { [seed] = required }, "");
+        }
         var paths = new Dictionary<uint, (int Depth, Cross? Cross)>();
         foreach (var (id, value) in stock)
             if (value.Total > 0 || value.CanProcure) paths[id] = (0, null);
+        if (planted != null)
+            foreach (var id in planted.Keys) paths.TryAdd(id, (1, planted[id]));
         bool changed;
         do {
             changed = false;
@@ -208,6 +215,10 @@ public static class SeedPlanner
         bool Visit(uint id, int count) {
             if (stock.TryGetValue(id, out var held) && held.Total >= count) return true;
             if (held?.CanProcure == true) { supplies[id] = Math.Max(supplies.GetValueOrDefault(id), count); return true; }
+            if (planted?.TryGetValue(id, out var pending) == true) {
+                AddStage(pending, count);
+                return true;
+            }
             if (!paths.TryGetValue(id, out var path) || !visiting.Add(id)) return false;
             var candidates = crosses.Where(c => c.Output == id && paths.ContainsKey(c.A) && paths.ContainsKey(c.B))
                 .OrderBy(c => 1 + Math.Max(paths[c.A].Depth, paths[c.B].Depth)).Distinct();
@@ -217,9 +228,7 @@ public static class SeedPlanner
                 var valid = Visit(pair.A, pair.A == pair.B ? 2 : 1) && (pair.A == pair.B || Visit(pair.B, 1));
                 if (valid) {
                     visiting.Remove(id);
-                    var existing = stages.FindIndex(s => s.Output == id);
-                    if (existing < 0) stages.Add(new(id, pair.A, pair.B, count));
-                    else if (stages[existing].Required < count) stages[existing] = stages[existing] with { Required = count };
+                    AddStage(pair, count);
                     return true;
                 }
                 supplies.Clear(); foreach (var p in previousSupplies) supplies[p.Key] = p.Value;
@@ -227,6 +236,11 @@ public static class SeedPlanner
             }
             visiting.Remove(id);
             return false;
+        }
+        void AddStage(Cross pair, int count) {
+            var existing = stages.FindIndex(s => s.Output == pair.Output);
+            if (existing < 0) stages.Add(new(pair.Output, pair.A, pair.B, count));
+            else if (stages[existing].Required < count) stages[existing] = stages[existing] with { Required = count };
         }
         return Visit(seed, required) ? new(stages, supplies, "") : new([], supplies, "시작 씨앗까지 연결되는 확보 경로 확인 필요");
     }
