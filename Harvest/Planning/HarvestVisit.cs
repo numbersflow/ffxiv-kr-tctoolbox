@@ -19,9 +19,9 @@ internal sealed partial class HarvestService
         public GardenCell? Cell;
         public ulong Object;
         public bool Cancel, Paused, Move, Travel, Scanning, Verifying, CareOnly;
-        public bool RouteWalking, CommandConfirmed;
+        public bool RouteWalking, CommandConfirmed, CheckingArrival;
         public HashSet<string> WalkedRoutes = [];
-        public HashSet<string> HomeArrivals = [];
+        public string HomeArrival = "";
         public HashSet<string> FailedRoutes = [];
         public int ReservedSlots = 8;
         public DateTime Started = DateTime.UtcNow, StepAt = DateTime.UtcNow, ScanAt, TravelAt, ArrivalCheckAt;
@@ -93,7 +93,7 @@ internal sealed partial class HarvestService
                 work.Cell = Profile.Cells.Where(c => c.Enabled && Profile.BatchFor(c) != null && (!work.CareOnly || CareCell(c)) && !work.Done.Contains(c.Id) && c.RetryAt <= DateTime.UtcNow
                     && (work.Plans.Contains(Profile.BatchFor(c)!) || Due(c) && ReadyForVisit(c)))
                     .Where(c => CanVisit(c))
-                    .OrderBy(c => VisitLocation(c) == work.LastFacility ? 0 : 1)
+                    .OrderBy(c => GardenPolicy.FacilityKey(c) == work.LastFacility ? 0 : 1)
                     .ThenBy(c => c.Owned || c.Pending.Length > 0 ? 0 : 1)
                     .ThenBy(c => Profile.BatchFor(c) is { Cross: true, Clearing: false } ? 0 : 1)
                     .ThenBy(c => !c.Owned && Profile.BatchFor(c) is { Cross: true } crossing && GardenPolicy.IsAnchor(crossing, c) ? 0 : 1).FirstOrDefault();
@@ -103,10 +103,12 @@ internal sealed partial class HarvestService
             }
             var cell = work.Cell;
             if (DateTime.UtcNow - work.StepAt > TimeSpan.FromMinutes(3)) throw new InvalidOperationException("시설 접근·조작 시간 초과");
+            work.CheckingArrival = true;
             if (WalkingRouteInProgress(work, cell, out var routePhase)) return Busy(work, routePhase);
             if (!AtCell(cell)) {
                 throw new InvalidOperationException("개인주택 텔레포트 결과가 등록한 재배 시설의 위치와 다릅니다.");
             }
+            work.CheckingArrival = false;
             work.Travel = false;
             if (work.Object == 0) {
                 var patches = NearbyPatches();
@@ -195,10 +197,23 @@ internal sealed partial class HarvestService
             return Busy(work, action.ToString()!);
         } catch (Exception ex) {
             error = ex.Message;
-            if (work.Cell != null && (work.Travel || work.RouteWalking)) work.FailedRoutes.Add(work.Cell.Group);
+            if (work.Cell is { } cell) {
+                if (work.CheckingArrival) {
+                    var facility = GardenPolicy.FacilityKey(cell);
+                    work.FailedRoutes.Add(facility);
+                    var retryAt = DateTime.UtcNow.AddMinutes(5);
+                    foreach (var other in Profile.Cells.Where(c => GardenPolicy.FacilityKey(c) == facility)) {
+                        other.Error = ex.Message;
+                        if (other.RetryAt < retryAt) other.RetryAt = retryAt;
+                    }
+                } else {
+                    cell.Error = ex.Message;
+                    cell.RetryAt = DateTime.UtcNow.AddMinutes(1);
+                }
+            }
+            work.CheckingArrival = false;
             StopOwnedTravel(work, resetRoutes: false);
             work.Failed++;
-            if (work.Cell is { } cell) { cell.Error = ex.Message; cell.RetryAt = DateTime.UtcNow.AddMinutes(1); }
             FinishCell(work); config.Save();
             return Busy(work, "해당 칸 보류 · " + ex.Message);
         }
@@ -320,20 +335,20 @@ internal sealed partial class HarvestService
     }
     private void StopOwnedTravel(Visit work, bool resetRoutes = true)
     {
-        if (resetRoutes) { work.HomeArrivals.Clear(); work.WalkedRoutes.Clear(); work.FailedRoutes.Clear(); }
+        if (resetRoutes) { work.HomeArrival = ""; work.WalkedRoutes.Clear(); work.FailedRoutes.Clear(); }
         if (work.Move) { ExternalNav.TryStopMovement(); work.Move = false; }
         if (work.Travel || work.RouteWalking) {
             var gate = Svc.PluginInterface.GetIpcSubscriber<object>("Lifestream.Abort");
             if (gate.HasAction) gate.InvokeAction();
             work.Travel = work.RouteWalking = false;
+            work.ArrivalCheckAt = DateTime.MinValue;
         }
     }
-    private static string VisitLocation(GardenCell cell) => $"{cell.World}:{cell.Territory}:{cell.House}:{cell.Kind}:{(cell.Kind == "pot" ? cell.Travel : cell.Group)}";
     private void FinishCell(Visit work)
     {
         if (work.Cell != null) {
             work.Done.Add(work.Cell.Id);
-            if (work.Cell.Error.Length == 0) work.LastFacility = VisitLocation(work.Cell);
+            if (work.Cell.Error.Length == 0) work.LastFacility = GardenPolicy.FacilityKey(work.Cell);
         }
         work.Cell = null; work.Object = 0; work.Scanning = false; work.Verifying = false;
     }

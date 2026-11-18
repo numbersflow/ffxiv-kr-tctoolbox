@@ -384,4 +384,13 @@ waitingCell.Owned=true;waitingCell.Seed=21;waitingCell.Crop=20;waitingCell.State
 run.Profile.AdditionalBatches.Add(new(){Goal=20,Output=20,SeedA=21,Clearing=true,Cells=[waitingCell.Id]});run.Initialize();
 Check(run.Profile.ActiveBatches.Single(b=>b.Cross).Cells.All(id=>run.Profile.Cells.Single(c=>c.Id==id).Index is 4 or 5),
     "A ready-to-harvest neighbor is still occupied, so a clear pair takes precedence immediately");
+run=Ordinary(1,ripe:true,flower:true);
+var potA=run.Profile.Cells[0];potA.Group="pot A";
+var potB=new GardenCell{Group="pot B",Kind="pot",Index=1,Owned=true,Seed=101,Crop=100,State="mature",Observed=DateTime.UtcNow};
+run.Profile.Cells.Add(potB);run.Profile.Batch!.Cells.Add(potB.Id);
+run.Initialize();run.FailArrivalKind="pot";
+Check(run.Start() && run.Run().Result=="Partial" && run.Teleports==1 && run.Calls.Count==0,
+    "A failed home entrance rejects the shared indoor facility after a single teleport and no crop interactions");
+Check(potA.RetryAt > DateTime.UtcNow.AddMinutes(4) && potB.RetryAt==potA.RetryAt && !run.Ready(),
+    "Both pots share the same arrival cooldown across visits instead of dispatching another immediate teleport");
 Console.WriteLine($"PASS {checks} actual visit/planner lifecycle checks; game, movement and inventory IPC are simulated.");

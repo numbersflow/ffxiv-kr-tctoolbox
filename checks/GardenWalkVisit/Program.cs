@@ -38,14 +38,14 @@ Check(service.Run(cell) && Svc.PluginInterface.Travel=="home","A new visit must 
 service=new(route);Svc.PluginInterface.HouseOverride=1;Svc.PluginInterface.TravelMode=null;
 Check(service.Run(cell) && Svc.PluginInterface.TravelMode==0,"A walk-to-door override must also be bypassed because the saved path starts at the teleport spawn.");
 service=new(route);service.RemoveRoute();Svc.PluginInterface.HouseOverride=2;
-Check(service.Run(cell) && Svc.PluginInterface.TravelMode==2,"Visits without a recorded outdoor walk retain the existing home-entry command for indoor pots.");
+Check(service.Run(cell) && Svc.PluginInterface.TravelMode==0,"An outdoor bed without a recording still requests outdoor arrival explicitly.");
 service=new(route);Svc.Objects.LocalPlayer.Position=new(20,0,20);
 service.Run(cell);service.TeleportFinished();
 Check(service.Run(cell),"A delayed arrival keeps the same cell pending");
 var recoverRequests=Svc.PluginInterface.HomeRequests;var recoverMoves=Svc.PluginInterface.Moves;
 Svc.Objects.LocalPlayer.Position=Vector3.Zero;
 Check(service.Run(cell) && Svc.PluginInterface.HomeRequests==recoverRequests && Svc.PluginInterface.Moves==recoverMoves+1,"Once arrival information settles, the same visit starts the saved walk without another teleport or skipped cell");
-service=new HarvestService(route);service.MarkFailed();var failedHomeRequests=Svc.PluginInterface.HomeRequests;
+service=new HarvestService(route);service.MarkFailed(cell);var failedHomeRequests=Svc.PluginInterface.HomeRequests;
 try{service.Run(cell);throw new Exception("A failed group restarted travel");}catch(InvalidOperationException){checks++;}
 Check(Svc.PluginInterface.HomeRequests==failedHomeRequests,"A failed route cannot teleport again for another cell during the same visit");
 var pot=new GardenCell{Group="indoor A",Kind="pot",World=1,Territory=20,House=3};
@@ -57,8 +57,12 @@ service.CurrentKind="pot";service.TeleportFinished();
 Check(!service.Run(pot) && !service.Run(otherPot) && Svc.PluginInterface.HomeRequests==beforeIndoor+1,
     "Two independently named pots in the same house share one indoor arrival");
 service.CurrentKind="plot";
-Check(service.Run(pot) && Svc.PluginInterface.HomeRequests==beforeIndoor+2,
-    "Returning indoors after an outdoor task must reacquire indoor arrival instead of trusting the old cache");
+Check(!service.Run(pot) && Svc.PluginInterface.HomeRequests==beforeIndoor+1,
+    "Loss of same-facility identity cannot order a second teleport while the visit is still there");
+Check(service.Run(cell) && Svc.PluginInterface.TravelMode==0,"Switching to the outdoor facility requests exactly one outdoor arrival");
+service.TeleportFinished();Check(!service.Run(cell),"Outdoor arrival replaces the cached indoor arrival");
+Check(service.Run(pot) && Svc.PluginInterface.HomeRequests==beforeIndoor+3,
+    "After genuine outdoor work, a newly needed indoor visit requests one new arrival");
 service=new(route);service.RemoveRoute();service.Run(pot);service.TeleportFinished();
 var delayedIndoorRequests=Svc.PluginInterface.HomeRequests;
 Check(service.Run(pot) && service.Run(pot) && Svc.PluginInterface.HomeRequests==delayedIndoorRequests,
@@ -68,6 +72,10 @@ Check(!service.Run(pot) && !service.Run(otherPot) && Svc.PluginInterface.HomeReq
     "A settled indoor arrival releases both pots after the same pending teleport");
 service=new(route);service.RemoveRoute();service.Run(pot);service.TeleportFinished();service.Run(pot);service.ArrivalTimedOut();
 try{service.Run(pot);throw new Exception("Wrong indoor house accepted");}catch(InvalidOperationException){checks++;}
+service.MarkFailed(pot);
+var failedIndoorRequests=Svc.PluginInterface.HomeRequests;
+try{service.Run(otherPot);throw new Exception("Second pot bypassed shared arrival failure");}
+catch(InvalidOperationException){Check(Svc.PluginInterface.HomeRequests==failedIndoorRequests,"An indoor failure blocks every pot at the same destination");}
 service=new(route);service.InRegisteredPlot=false;Svc.Objects.LocalPlayer.Position=Vector3.Zero;
 var beforeWalkRequests=Svc.PluginInterface.HomeRequests;
 service.Run(cell);service.TeleportFinished();service.Run(cell);

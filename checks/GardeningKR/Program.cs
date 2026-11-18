@@ -131,15 +131,15 @@ Check(autoProfile.RegisterPatches(recreatedCells,()=>{})==0 && autoProfile.Cells
     var service=(HarvestService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HarvestService));
     var visitType=typeof(HarvestService).GetNestedType("Visit",System.Reflection.BindingFlags.NonPublic)!;
     var work=Activator.CreateInstance(visitType,true)!;
-    var arrivals=(HashSet<string>)visitType.GetField("HomeArrivals")!.GetValue(work)!;
+    var arrival=visitType.GetField("HomeArrival")!;
     var walked=(HashSet<string>)visitType.GetField("WalkedRoutes")!.GetValue(work)!;
     var failed=(HashSet<string>)visitType.GetField("FailedRoutes")!.GetValue(work)!;
-    arrivals.Add("bed");walked.Add("bed");failed.Add("bed");
+    arrival.SetValue(work,"bed");walked.Add("bed");failed.Add("bed");
     var stop=typeof(HarvestService).GetMethod("StopOwnedTravel",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
     stop.Invoke(service,new object[]{work,false});
-    Check(arrivals.Contains("bed") && walked.Contains("bed") && failed.Contains("bed"),"A cell failure must preserve completed travel and cannot trigger a fresh teleport for the next slot");
+    Check((string)arrival.GetValue(work)! =="bed" && walked.Contains("bed") && failed.Contains("bed"),"A cell failure must preserve completed travel and cannot trigger a fresh teleport for the next slot");
     stop.Invoke(service,new object[]{work,true});
-    Check(arrivals.Count==0 && walked.Count==0 && failed.Count==0,"Cancellation and pause invalidate the route so the next visit starts with a fresh home teleport");
+    Check((string)arrival.GetValue(work)! == "" && walked.Count==0 && failed.Count==0,"Cancellation and pause invalidate the route so the next visit starts with a fresh home teleport");
 }
 var ambiguousLegacy=new GardenCell{Group="legacy",World=1,Territory=2,House=3,X=origin.X,Y=origin.Y,Z=origin.Z};
 var liveSibling=new GardenCell{Group="legacy",World=1,Territory=2,House=3,X=origin.X,Y=origin.Y,Z=origin.Z,LayoutInstanceKey=1,LayoutSubId=999,Owned=true,Seed=123};

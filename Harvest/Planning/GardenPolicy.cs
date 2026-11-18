@@ -6,6 +6,8 @@ namespace Harvest.Planning;
 
 public static class GardenPolicy
 {
+    public static string FacilityKey(GardenCell cell) => $"{cell.World}:{cell.Territory}:{cell.House}:{cell.Kind}:{(cell.Kind == "pot" ? "" : cell.Group)}";
+
     public static uint Soil(bool cross, uint crossingSoil) => cross ? crossingSoil : 16026u;
 
     public static bool CanVisit(GardenCell cell, IReadOnlyDictionary<uint, Stock> stock, uint soil, bool plantingReady = true) =>

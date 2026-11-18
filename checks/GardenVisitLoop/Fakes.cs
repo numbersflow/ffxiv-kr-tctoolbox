@@ -122,6 +122,7 @@ namespace Harvest.Planning {
         private int HarvestSlots(GardenCell cell)=>1;
         private static bool AtCell(GardenCell cell)=>true;
         private GardenPatch[] NearbyPatches()=>Profile.Cells.Select(c=>new GardenPatch((ulong)c.Index+1,c.Kind,1,(uint)c.Index,c.Position,c.Position)).ToArray();
-        private bool WalkingRouteInProgress(Visit run,GardenCell cell,out string phase){phase="teleport";var location=VisitLocation(cell);if(currentLocation!=location){Teleports++;currentLocation=location;return true;}return false;}
+        public string FailArrivalKind="";
+        private bool WalkingRouteInProgress(Visit run,GardenCell cell,out string phase){phase="teleport";var location=GardenPolicy.FacilityKey(cell);if(currentLocation!=location){Teleports++;currentLocation=location;return true;}if(cell.Kind==FailArrivalKind)throw new InvalidOperationException("Wrong house");return false;}
     }
 }

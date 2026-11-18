@@ -10,23 +10,16 @@ internal sealed partial class HarvestService
     private bool WalkingRouteInProgress(Visit work, GardenCell cell, out string phase)
     {
         phase = "개인주택 텔레포트";
-        if (work.FailedRoutes.Contains(cell.Group)) throw new InvalidOperationException("이번 방문에서 해당 경로가 실패하여 재이동을 보류합니다.");
+        var arrivalKey = GardenPolicy.FacilityKey(cell);
+        if (work.FailedRoutes.Contains(arrivalKey)) throw new InvalidOperationException("이번 방문에서 해당 경로가 실패하여 재이동을 보류합니다.");
         var busy = Svc.PluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
-        var arrivalKey = cell.Kind == "pot" ? $"pot:{cell.World}:{cell.Territory}:{cell.House}:{cell.Travel}" : cell.Group;
-        if (work.HomeArrivals.Contains(arrivalKey) && !work.Travel
-            && (cell.Kind == "pot" || work.WalkedRoutes.Contains(cell.Group)) && !AtCell(cell)) {
-            work.HomeArrivals.Remove(arrivalKey); work.WalkedRoutes.Remove(cell.Group);
-        }
-        if (!work.HomeArrivals.Contains(arrivalKey)) {
+        if (work.HomeArrival != arrivalKey) {
             if (!work.Travel) {
                 if (busy.InvokeFunc() || ExternalNav.TryGetActiveMover(out _)) return true;
-                if (cell.Kind == "pot") {
-                    // Enter_house=2: indoor crops must not depend on the user's default home-entry mode.
-                    Svc.PluginInterface.GetIpcSubscriber<int, int?, object>("Lifestream.EnqueuePropertyShortcut").InvokeAction(1, 2);
-                } else if (Profile.WalkRoutes.ContainsKey(cell.Group)) {
-                    // PropertyType.Home=1, HouseEnterMode.None=0: the recorded outdoor path owns the walk after teleport.
-                    Svc.PluginInterface.GetIpcSubscriber<int, int?, object>("Lifestream.EnqueuePropertyShortcut").InvokeAction(1, 0);
-                } else Svc.PluginInterface.GetIpcSubscriber<string, object>("Lifestream.ExecuteCommand").InvokeAction("home");
+                // The default house entry mode may point to a different side of the entrance.
+                Svc.PluginInterface.GetIpcSubscriber<int, int?, object>("Lifestream.EnqueuePropertyShortcut")
+                    .InvokeAction(1, cell.Kind == "pot" ? 2 : 0);
+                work.HomeArrival = ""; work.WalkedRoutes.Clear();
                 work.Travel = true; work.TravelAt = DateTime.UtcNow;
                 return true;
             }
@@ -34,21 +27,17 @@ internal sealed partial class HarvestService
                 work.ArrivalCheckAt = DateTime.MinValue;
                 return true;
             }
-            if (cell.Kind == "pot" && !AtCell(cell)) {
-                phase = "실내 입장·주택 정보 확인";
+            var arrived = Profile.WalkRoutes.TryGetValue(cell.Group, out var arrivalRoute)
+                ? Svc.Objects.LocalPlayer is { } player && arrivalRoute.CanJoin(CurrentRouteLocation(), player.Position)
+                : AtCell(cell);
+            if (!arrived) {
+                phase = cell.Kind == "pot" ? "실내 입장·주택 정보 확인" : "주택 도착 정보 확인";
                 if (work.ArrivalCheckAt == DateTime.MinValue) work.ArrivalCheckAt = DateTime.UtcNow;
                 if (DateTime.UtcNow - work.ArrivalCheckAt < TimeSpan.FromSeconds(10)) return true;
-                Svc.Log.Information($"Garden indoor arrival mismatch: expected={cell.World}:{cell.Territory}:{cell.House}, actual={CurrentRouteLocation()}");
-                throw new InvalidOperationException("실내 입장 후 등록한 주택 정보를 확인할 수 없습니다.");
+                throw new InvalidOperationException("개인주택 도착 정보를 기다렸지만 등록한 재배 시설 또는 도보 경로와 일치하지 않습니다.");
             }
-            if (Profile.WalkRoutes.TryGetValue(cell.Group, out var arrivalRoute)
-                && (Svc.Objects.LocalPlayer is not { } arrivedPlayer || !arrivalRoute.CanJoin(CurrentRouteLocation(), arrivedPlayer.Position))) {
-                phase = "주택 도착 정보 확인";
-                if (work.ArrivalCheckAt == DateTime.MinValue) work.ArrivalCheckAt = DateTime.UtcNow;
-                if (DateTime.UtcNow - work.ArrivalCheckAt < TimeSpan.FromSeconds(10)) return true;
-                throw new InvalidOperationException("개인주택 도착 정보를 기다렸지만 저장한 도보 경로와 일치하지 않습니다.");
-            }
-            work.Travel = false; work.ArrivalCheckAt = DateTime.MinValue; work.HomeArrivals.Add(arrivalKey);
+            work.Travel = false; work.ArrivalCheckAt = DateTime.MinValue;
+            work.HomeArrival = arrivalKey;
         }
         phase = "저장한 도보 경로 이동";
         if (!Profile.WalkRoutes.TryGetValue(cell.Group, out var route)) return false;
