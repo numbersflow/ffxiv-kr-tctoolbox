@@ -9,6 +9,7 @@ using Dalamud.Memory;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel;
@@ -133,6 +134,10 @@ public sealed unsafe partial class AutoGardensWork : TcModule
     }
 
     private readonly TaskQueue queue = new();
+    private const string CloseOpeningPatchMenuStep = "關閉尚未操作的園圃選單";
+    private PatchJob? openingPatchMenu;
+    private ulong openingPatchOwner;
+    private uint openingPatchTerritory;
 
     // YesAlready 自己也會按這三種視窗（功能名＝它的類別名），而且是在視窗出現的當下就按。
     // 批次期間請它讓開；確認不了就整輪停下，不兩邊各按一次。
@@ -202,6 +207,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
 
         queue.OnTimeout = step =>
         {
+            QueueCloseOpeningPatchMenu();
             lastSummary = $"步驟逾時已中止：{step}（完成 {doneCount} 格、跳過 {skippedCount} 格）。";
             Svc.Chat.PrintError($"[Harvest] 園圃步驟逾時，批次已停止：{step}（已完成 {doneCount} 格）");
         };
@@ -233,6 +239,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         Svc.ClientState.TerritoryChanged -= OnTerritoryChanged;
         Svc.Framework.Update -= OnUpdate;
         queue.Abort();
+        openingPatchMenu = null;
         TextAdvanceLock.Release(InternalName);
         scannedActions.Clear();
         ResetAutoLoop();
@@ -479,6 +486,9 @@ public sealed unsafe partial class AutoGardensWork : TcModule
             if (!KeepTalkAndMenuExclusive()) return StopForYesAlready("對話或選單");
 
             // 紅線替代：不用 EventStart 封包，走標準物件互動（AutoRetainer／Lifestream 台服生產同法）
+            openingPatchMenu = job;
+            openingPatchOwner = Svc.PlayerState.ContentId;
+            openingPatchTerritory = Svc.ClientState.TerritoryType;
             TargetSystem.Instance()->InteractWithObject((GameObject*)obj.Address, false);
             job.Interacted = true;
             return true;
@@ -512,6 +522,8 @@ public sealed unsafe partial class AutoGardensWork : TcModule
             // 🔴 選項文字讀出 U+FFFD ＝選單記憶體正在變動（建到一半／關閉中）：這一幀不判也不按，下一 tick 重讀。
             if (UiHelper.LooksMidUpdate(entries)) return false;
             var cancelIndex = entries.FindIndex(x => x.Contains(textCancel, StringComparison.Ordinal));
+            // Once an action can be sent, leave its completion to the normal result checks.
+            openingPatchMenu = null;
 
             // Scan：只記錄目前可用的選項後取消，不改變地壟狀態。
             // 地壟的作物狀態無法從記憶體離線讀取（ClientStructs 無生長階段欄位），
@@ -1118,11 +1130,60 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         return string.Empty;
     }
 
+    private void QueueCloseOpeningPatchMenu()
+    {
+        if (openingPatchMenu is not { Interacted: true } job)
+        {
+            openingPatchMenu = null;
+            return;
+        }
+        var owner = openingPatchOwner;
+        var territory = openingPatchTerritory;
+        openingPatchMenu = null;
+        var cancelSent = false;
+        queue.Enqueue(CloseOpeningPatchMenuStep, () =>
+        {
+            if (!Svc.ClientState.IsLoggedIn || owner == 0 || owner != Svc.PlayerState.ContentId
+                || territory != Svc.ClientState.TerritoryType)
+                return true;
+
+            var talk = Svc.GameGui.GetAddonByName(UiHelper.TalkAddonName).IsVisible;
+            var menu = Svc.GameGui.GetAddonByName("SelectString").IsVisible;
+            if (!Svc.Condition[ConditionFlag.OccupiedInQuestEvent])
+                return !talk && !menu;
+
+            var events = EventFramework.Instance();
+            if (events == null || (events->SceneGameObjectId.Id != job.GameObjectId
+                && events->EventState1.ObjectId.Id != job.GameObjectId && events->EventState2.ObjectId.Id != job.GameObjectId))
+                return true;
+            if (!TalkAndMenuExclusive || cancelSent)
+                return false;
+            if (talk)
+            {
+                if (TextAdvanceLock.MayClickTalk)
+                    UiHelper.ClickTalkIfOpen();
+                return false;
+            }
+
+            var addon = UiHelper.GetAddon("SelectString");
+            if (!UiHelper.IsReady(addon))
+                return false;
+            var entries = UiHelper.GetSelectStringEntries(addon);
+            if (UiHelper.LooksMidUpdate(entries))
+                return false;
+            var cancel = entries.FindIndex(entry => entry.Contains(textCancel, StringComparison.Ordinal));
+            if (cancel >= 0)
+                cancelSent = UiHelper.TryFireCallback(addon, true, cancel);
+            return false;
+        }, 12_000);
+    }
+
     /// <summary>停止目前佇列中的所有作業。</summary>
     public void StopBatch()
     {
-        if (!queue.IsBusy) return;
+        if (!queue.IsBusy || queue.CurrentStep == CloseOpeningPatchMenuStep) return;
         queue.Abort();
+        QueueCloseOpeningPatchMenu();
 
         // 🔴 佇列清掉不會讓角色停下來——走位是交給 vnavmesh 跑的，它不知道我們放棄了。
         //    這裡不補一句停止的話，表現是「按了停止，角色照樣走到下一格才站住」。
