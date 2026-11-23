@@ -15,6 +15,20 @@ program = r'''
 using System;
 using System.Collections.Generic;
 using Harvest.Core;
+foreach (var menuOpens in new[] { false, true }) {
+    Reset();
+    var visit = new Garden();
+    visit.BeginMenu();
+    var start = DateTime.UtcNow;
+    visit.Tick(start);
+    visit.Tick(start.AddMilliseconds(14739));
+    Check(UiHelper.TalkClicks == 2, "Garden must inspect the dialog after the stalled frame");
+    UiHelper.Talk = false;
+    UiHelper.Menu = menuOpens;
+    visit.Tick(start.AddSeconds(15));
+    visit.Tick(start.AddSeconds(30));
+    Check(!visit.Busy && visit.Actions == (menuOpens ? 1 : 0), "Menu advances once or expires after bounded recovery");
+}
 Case(true, () => Svc.PlayerState.ContentId++);
 Case(true, () => Svc.ClientState.TerritoryType++);
 Case(true, () => EventFramework.SetObject(8));
@@ -77,7 +91,15 @@ unsafe class Garden {
     private bool TalkAndMenuExclusive = true;
     public int Actions;
     public bool Busy => queue.IsBusy;
-    private class PatchJob { public bool Interacted = true; public ulong GameObjectId = 7; }
+    private class PatchJob { public bool Interacted = true; public ulong GameObjectId = 7; public bool Skipped { get; set; } }
+    private void CaptureTalkState(PatchJob job) {}
+    private bool? StopForYesAlready(string _) => null;
+    public void BeginMenu() {
+        var job = new PatchJob();
+        MENU_WAIT
+        queue.Enqueue("act", () => { Actions++; return true; });
+    }
+    public void Tick(DateTime now) => queue.Tick(now);
     public void Begin(bool timeout) {
         openingPatchMenu = new();
         openingPatchOwner = 1;
@@ -105,7 +127,8 @@ static class UiHelper {
     public const string TalkAddonName = "Talk";
     public static bool Talk,Menu,AcceptCancel;
     public static int TalkClicks,MenuCancels;
-    public static bool ClickTalkIfOpen() { TalkClicks++; return true; }
+    public static bool IsAddonReady(string _) => Menu;
+    public static bool ClickTalkIfOpen() { if (!Talk) return false; TalkClicks++; return true; }
     public static int GetAddon(string _) => 1;
     public static bool IsReady(int _) => Menu;
     public static bool LooksMidUpdate(List<string> _) => false;
@@ -131,6 +154,7 @@ static class Svc {
 }
 '''
 program = program.replace("ON_TIMEOUT", section("queue.OnTimeout = step =>", "// 走位會發起"))
+program = program.replace("MENU_WAIT", section('queue.EnqueueUiWait("等待選單開啟"', 'queue.Enqueue("選擇動作"'))
 program = program.replace("CLEANUP_AND_STOP", section("private void QueueCloseOpeningPatchMenu()", "    #endregion"))
 with tempfile.TemporaryDirectory(prefix="harvest-menu-") as folder:
     target = Path(folder)

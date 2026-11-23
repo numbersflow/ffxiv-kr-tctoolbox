@@ -18,7 +18,9 @@ public sealed class TaskQueue
         public required string Name;
         public required Func<bool?> Step;
         public int TimeoutMs;
-        public DateTime? StartedAt;
+        public DateTime? Deadline;
+        public bool AllowResumeAfterStall;
+        public DateTime LastTick;
     }
 
     private readonly List<Entry> entries = [];
@@ -39,6 +41,9 @@ public sealed class TaskQueue
 
     public void Enqueue(string name, Func<bool?> step, int? timeoutMs = null) =>
         entries.Add(new Entry { Name = name, Step = step, TimeoutMs = timeoutMs ?? DefaultTimeoutMs });
+
+    public void EnqueueUiWait(string name, Func<bool?> step, int timeoutMs) =>
+        entries.Add(new Entry { Name = name, Step = step, TimeoutMs = timeoutMs, AllowResumeAfterStall = true });
 
     public void Enqueue(string name, Action action, int? timeoutMs = null) =>
         Enqueue(name, () =>
@@ -70,14 +75,23 @@ public sealed class TaskQueue
         return true;
     }
 
-    public void Tick()
+    public void Tick() => Tick(DateTime.UtcNow);
+
+    internal void Tick(DateTime now)
     {
         if (entries.Count == 0) return;
 
         var current = entries[0];
-        current.StartedAt ??= DateTime.UtcNow;
+        current.Deadline ??= now.AddMilliseconds(current.TimeoutMs);
+        // Give the UI one bounded opportunity to process input and publish its next frame.
+        if (now > current.Deadline && current.AllowResumeAfterStall && (now - current.LastTick).TotalSeconds >= 1)
+        {
+            current.AllowResumeAfterStall = false;
+            current.Deadline = now.AddSeconds(2);
+        }
+        current.LastTick = now;
 
-        if ((DateTime.UtcNow - current.StartedAt.Value).TotalMilliseconds > current.TimeoutMs)
+        if (now > current.Deadline)
         {
             Svc.Log.Warning($"[TaskQueue] 步驟逾時，中止佇列：{current.Name}（捨棄後面 {entries.Count - 1} 項）");
             Abort();

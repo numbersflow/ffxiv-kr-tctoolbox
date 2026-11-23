@@ -494,7 +494,7 @@ public sealed unsafe partial class AutoGardensWork : TcModule
             return true;
         });
 
-        queue.Enqueue("等待選單開啟", () =>
+        queue.EnqueueUiWait("等待選單開啟", () =>
         {
             if (job.Skipped) return true;
 
@@ -1141,21 +1141,37 @@ public sealed unsafe partial class AutoGardensWork : TcModule
         var territory = openingPatchTerritory;
         openingPatchMenu = null;
         var cancelSent = false;
-        queue.Enqueue(CloseOpeningPatchMenuStep, () =>
+        (bool, bool, bool, ulong, ulong, ulong, bool)? previous = null;
+        queue.EnqueueUiWait(CloseOpeningPatchMenuStep, () =>
         {
             if (!Svc.ClientState.IsLoggedIn || owner == 0 || owner != Svc.PlayerState.ContentId
                 || territory != Svc.ClientState.TerritoryType)
+            {
+                Svc.Log.Information($"[Garden recovery] plot={job.GameObjectId:X} ended on character or territory change");
                 return true;
+            }
 
             var talk = Svc.GameGui.GetAddonByName(UiHelper.TalkAddonName).IsVisible;
             var menu = Svc.GameGui.GetAddonByName("SelectString").IsVisible;
-            if (!Svc.Condition[ConditionFlag.OccupiedInQuestEvent])
+            var occupied = Svc.Condition[ConditionFlag.OccupiedInQuestEvent];
+            var events = EventFramework.Instance();
+            var scene = events == null ? 0UL : events->SceneGameObjectId.Id;
+            var first = events == null ? 0UL : events->EventState1.ObjectId.Id;
+            var second = events == null ? 0UL : events->EventState2.ObjectId.Id;
+            var state = (talk, menu, occupied, scene, first, second, cancelSent);
+            if (previous != state)
+            {
+                Svc.Log.Information($"[Garden recovery] plot={job.GameObjectId:X} talk={talk} menu={menu} occupied={occupied} scene={scene:X} event1={first:X} event2={second:X} cancelSent={cancelSent}");
+                previous = state;
+            }
+            if (!occupied)
                 return !talk && !menu;
 
-            var events = EventFramework.Instance();
-            if (events == null || (events->SceneGameObjectId.Id != job.GameObjectId
-                && events->EventState1.ObjectId.Id != job.GameObjectId && events->EventState2.ObjectId.Id != job.GameObjectId))
+            if (events == null || (scene != job.GameObjectId && first != job.GameObjectId && second != job.GameObjectId))
+            {
+                Svc.Log.Information($"[Garden recovery] plot={job.GameObjectId:X} ended without a matching event target");
                 return true;
+            }
             if (!TalkAndMenuExclusive || cancelSent)
                 return false;
             if (talk)
