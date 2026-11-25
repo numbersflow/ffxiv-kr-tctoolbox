@@ -200,15 +200,23 @@ internal sealed partial class HarvestService : IDisposable
         }
     }
 
+    private static string ReadBookNeeds(uint scope)
+    {
+        var needs = Svc.PluginInterface.GetIpcSubscriber<uint, string>("GatherBuddyReborn.GetHarvestBookNeeds");
+        if (needs.HasFunction) return needs.InvokeFunc(scope);
+        return scope == 6 ? Svc.PluginInterface.GetIpcSubscriber<string>("GatherBuddyReborn.GetHarvestBookMaterials").InvokeFunc()
+            : Svc.PluginInterface.GetIpcSubscriber<uint, string>("GatherBuddyReborn.GetWorkflowBookMaterials").InvokeFunc(scope);
+    }
+
     private void RefreshGardenBooks()
     {
         try {
-            bookCache.Update(Svc.PluginInterface.GetIpcSubscriber<string>("GatherBuddyReborn.GetHarvestBookMaterials").InvokeFunc(), owner);
+            bookCache.Update(ReadBookNeeds(6), owner);
             var requiredScopes = Profile.BookItems.SelectMany(Profile.BookExpansions).Where(scope => scope != 6).Distinct().ToArray();
             foreach (var stale in scopedBookCaches.Keys.Except(requiredScopes).ToArray()) scopedBookCaches.Remove(stale);
             foreach (var scope in requiredScopes) {
                 if (!scopedBookCaches.TryGetValue(scope, out var cache)) scopedBookCaches[scope] = cache = new();
-                cache.Update(Svc.PluginInterface.GetIpcSubscriber<uint, string>("GatherBuddyReborn.GetWorkflowBookMaterials").InvokeFunc(scope), owner, scope);
+                cache.Update(ReadBookNeeds(scope), owner, scope);
             }
             if (bookReady) {
                 var caches = new Dictionary<uint, GardenBookCache>(scopedBookCaches) { [6] = bookCache };
@@ -237,7 +245,7 @@ internal sealed partial class HarvestService : IDisposable
         var scope = (uint)requestedGardenExpansion;
         if (scope >= 6) return;
         try {
-            using var doc = JsonDocument.Parse(Svc.PluginInterface.GetIpcSubscriber<uint, string>("GatherBuddyReborn.GetWorkflowBookMaterials").InvokeFunc(scope));
+            using var doc = JsonDocument.Parse(ReadBookNeeds(scope));
             var b = doc.RootElement;
             if (!b.GetProperty("Available").GetBoolean() || b.GetProperty("Character").GetUInt64() != owner
                 || b.GetProperty("Expansion").GetUInt32() != scope
