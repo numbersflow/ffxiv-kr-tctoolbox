@@ -45,6 +45,8 @@ internal sealed partial class HarvestService : IDisposable
     private string lastReadiness = "";
     internal static TimeSpan RefreshInterval(bool pending) => TimeSpan.FromMilliseconds(pending ? 250 : 5000);
     private DateTime nextRefresh;
+    // Collect on the framework thread, then publish the complete set for one character.
+    private readonly GardenBookSweep bookSweep = new();
     private ulong owner;
     private Visit? visit;
     private HarvestProfile? displayProfile;
@@ -126,20 +128,27 @@ internal sealed partial class HarvestService : IDisposable
         if (DateTime.UtcNow < nextRefresh) return;
         nextRefresh = DateTime.UtcNow + RefreshInterval(false);
         if (visit != null) {
+            bookSweep.Reset();
             if (Svc.PlayerState.ContentId == owner) PublishGardenView();
             return;
         }
         var current = Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0;
         if (current != owner) { owner = current; inventoryChecked = false; stock.Clear(); bookCache.Reset(); scopedBookCaches.Clear(); selectedBookNeeds = null; supplies.Clear(); gardenScopes.Clear(); soilVentureSnapshot = "{\"Available\":false}"; gardenView = "{\"Available\":false}"; }
-        stockKnown = false;
-        if (owner == 0) { displayProfile = null; snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"접속 대기\"}"; return; }
+        if (owner == 0) { bookSweep.Reset(); stockKnown = false; displayProfile = null; snapshot = "{\"Available\":false,\"Ready\":false,\"Error\":\"접속 대기\"}"; return; }
         while (pendingConfiguration.TryDequeue(out var change)) Configure(change);
+        bool collecting = false, freshStock = false;
         try {
             if (PluginPresence.IsLoaded("TCToolbox") != false) throw new InvalidOperationException("이전 TCToolbox 비활성화 확인 필요");
             if (catalog == null) {
                 catalog = new();
                 GardenCropData.AddKnownCropNames(catalog.Crops.Values.Select(c => (c.Name, c.Item)));
             }
+            if (!CollectBookScope()) {
+                collecting = true;
+                nextRefresh = DateTime.MinValue;
+                return;
+            }
+            stockKnown = false;
             RefreshGardenBooks();
             var ids = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Concat(new uint[] { Profile.Soil, 16026, 14011, 14012, 14013 })
                 .Where(i => i > 0).Distinct().ToArray();
@@ -160,7 +169,7 @@ internal sealed partial class HarvestService : IDisposable
                 ReadVisitInventory(ids); inventoryChecked = true;
                 Svc.Log.Information($"Garden native inventory checked: rows={ids.Length}, differences={stock.Count(p => p.Value.Inventory != previousBag[p.Key])}");
             }
-            stockKnown = true;
+            stockKnown = freshStock = true;
             if (Profile.BookItems.Count > 0 && !bookReady) {
                 if (bookUpdating) throw new GardenBookPendingException();
                 throw new InvalidOperationException(bookError);
@@ -183,6 +192,7 @@ internal sealed partial class HarvestService : IDisposable
                 Goals = Profile.Goals, BookItems = Profile.BookItems, Growable = catalog.Crops.Keys,
                 Searchable = catalog.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         } catch (Exception ex) {
+            stockKnown = freshStock;
             if (ex is GardenBookPendingException) nextRefresh = DateTime.UtcNow + RefreshInterval(true);
             error = ex is GardenBookPendingException ? "" : ex.Message;
             var care = catalog != null && Profile.Batch != null && HasCareDue()
@@ -192,12 +202,20 @@ internal sealed partial class HarvestService : IDisposable
                 CareOnly = care, Supply = (object?)null, Error = error, Growable = catalog?.Crops.Keys,
                 Searchable = catalog?.Crops.Keys.Concat(catalog.SeedCrops.Keys).Distinct() });
         } finally {
-            PublishGardenView();
-            using var state = JsonDocument.Parse(snapshot);
-            var r = state.RootElement;
-            var readiness = $"available={r.GetProperty("Available")}, ready={r.GetProperty("Ready")}, bookReady={bookReady}, bookUpdating={bookUpdating}, bookSnapshot={bookCache.HasSnapshot}, stockKnown={stockKnown}, error={error}, batches={string.Join(',', Profile.ActiveBatches.Select(b => b.Output))}, soilReserve={soilVentureSnapshot}, supplies={string.Join(',', supplies.Select(p => $"{p.Key}:{p.Value}[bag={stock.GetValueOrDefault(p.Key)?.Inventory},retainer={stock.GetValueOrDefault(p.Key)?.Retainer},now={stock.GetValueOrDefault(p.Key)?.CanProcureNow}]"))}";
-            if ((!bookUpdating || error.Length > 0) && readiness != lastReadiness) { lastReadiness = readiness; Svc.Log.Information("Garden readiness: " + readiness); }
+            if (!collecting) {
+                bookSweep.Reset();
+                PublishReadiness();
+            }
         }
+    }
+
+    private void PublishReadiness()
+    {
+        PublishGardenView();
+        using var state = JsonDocument.Parse(snapshot);
+        var r = state.RootElement;
+        var readiness = $"available={r.GetProperty("Available")}, ready={r.GetProperty("Ready")}, bookReady={bookReady}, bookUpdating={bookUpdating}, bookSnapshot={bookCache.HasSnapshot}, stockKnown={stockKnown}, error={error}, batches={string.Join(',', Profile.ActiveBatches.Select(b => b.Output))}, soilReserve={soilVentureSnapshot}, supplies={string.Join(',', supplies.Select(p => $"{p.Key}:{p.Value}[bag={stock.GetValueOrDefault(p.Key)?.Inventory},retainer={stock.GetValueOrDefault(p.Key)?.Retainer},now={stock.GetValueOrDefault(p.Key)?.CanProcureNow}]"))}";
+        if ((!bookUpdating || error.Length > 0) && readiness != lastReadiness) { lastReadiness = readiness; Svc.Log.Information("Garden readiness: " + readiness); }
     }
 
     private static string ReadBookNeeds(uint scope)
@@ -208,15 +226,21 @@ internal sealed partial class HarvestService : IDisposable
             : Svc.PluginInterface.GetIpcSubscriber<uint, string>("GatherBuddyReborn.GetWorkflowBookMaterials").InvokeFunc(scope);
     }
 
+    private bool CollectBookScope()
+    {
+        var scopes = Profile.BookItems.SelectMany(Profile.BookExpansions).Append(6u).Distinct().Order().ToArray();
+        return bookSweep.ReadNext(owner, scopes, ReadBookNeeds);
+    }
+
     private void RefreshGardenBooks()
     {
         try {
-            bookCache.Update(ReadBookNeeds(6), owner);
+            bookCache.Update(bookSweep.Results[6], owner);
             var requiredScopes = Profile.BookItems.SelectMany(Profile.BookExpansions).Where(scope => scope != 6).Distinct().ToArray();
             foreach (var stale in scopedBookCaches.Keys.Except(requiredScopes).ToArray()) scopedBookCaches.Remove(stale);
             foreach (var scope in requiredScopes) {
                 if (!scopedBookCaches.TryGetValue(scope, out var cache)) scopedBookCaches[scope] = cache = new();
-                cache.Update(ReadBookNeeds(scope), owner, scope);
+                cache.Update(bookSweep.Results[scope], owner, scope);
             }
             if (bookReady) {
                 var caches = new Dictionary<uint, GardenBookCache>(scopedBookCaches) { [6] = bookCache };

@@ -21,6 +21,21 @@ static void Run()
 {
 typeof(Svc).GetProperty("PluginInterface")!.SetValue(null,
     System.Reflection.DispatchProxy.Create<Dalamud.Plugin.IDalamudPluginInterface, ConfigSaveProxy>());
+var sweep = new GardenBookSweep();
+var calls = new List<uint>();
+string ReadScope(uint scope) { calls.Add(scope); return scope.ToString(); }
+if (sweep.ReadNext(1, [0, 6], ReadScope) || calls.Count != 1
+    || sweep.ReadNext(1, [0, 6], ReadScope) || calls.Count != 2
+    || !sweep.ReadNext(1, [0, 6], ReadScope) || calls.Count != 2)
+    throw new Exception("Each frame reads at most one scope before publishing");
+if (sweep.ReadNext(2, [0, 6], ReadScope) || sweep.Results.ContainsKey(6)
+    || sweep.ReadNext(2, [1, 6], ReadScope) || sweep.Results.ContainsKey(0))
+    throw new Exception("Do not combine material results across characters or scope selections");
+sweep.Reset();
+if (sweep.Results.Count != 0 || sweep.ReadNext(2, [6], _ => throw new Exception("offline"))
+    || !sweep.ReadNext(2, [6], ReadScope) || !sweep.Results[6].Contains("offline"))
+    throw new Exception("Cancellation discards partial data and unavailable scopes keep their error");
+Console.WriteLine("PASS garden refresh frame budget, character change, selection change, cancellation and IPC failure");
 var passed = 0;
 void Check(bool condition, string message)
 {
