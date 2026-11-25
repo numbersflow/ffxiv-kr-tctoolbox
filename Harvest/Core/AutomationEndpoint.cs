@@ -66,6 +66,7 @@ internal sealed class AutomationEndpoint : IDisposable
     private readonly Func<string, JsonElement, AutomationWork> create;
     private readonly Func<bool> safe;
     private readonly Func<bool> busy;
+    private readonly Func<string?>? startBlockReason;
     private readonly Func<ulong> character;
     private readonly Func<object>? candidates;
     private readonly Func<string, bool>? canStart;
@@ -95,15 +96,23 @@ internal sealed class AutomationEndpoint : IDisposable
 
     public AutomationEndpoint(IDalamudPluginInterface pi, IFramework framework, string name,
         Func<string, JsonElement, AutomationWork> create, Func<bool> safe, Func<bool> busy, Func<ulong> character, Func<object>? candidates = null,
-        Func<string, bool>? canStart = null, Action? resetCandidates = null, Func<long>? clock = null)
+        Func<string, bool>? canStart = null, Action? resetCandidates = null, Func<long>? clock = null, Func<string?>? startBlockReason = null)
     {
         this.framework = framework; this.create = create; this.safe = safe; this.busy = busy; this.character = character;
         this.candidates = candidates;
         this.canStart = canStart;
+        this.startBlockReason = startBlockReason;
         this.resetCandidates = resetCandidates; this.clock = clock ?? (() => Environment.TickCount64);
         gate = pi.GetIpcProvider<string, string>(name + ".AutomationV1");
         gate.RegisterFunc(Handle);
         framework.Update += Tick;
+    }
+
+    private string? StartBlockReason()
+    {
+        if (work != null || busy()) return "Harvest 작업 또는 경로 기록 진행 중";
+        if (character() == 0) return "캐릭터 접속 확인 대기";
+        return startBlockReason != null ? startBlockReason() : safe() ? null : "Character cannot start safely";
     }
 
     private string Handle(string json)
@@ -125,12 +134,11 @@ internal sealed class AutomationEndpoint : IDisposable
             if (action == "Candidates") return JsonSerializer.Serialize(new { Accepted = true, Candidates = candidates?.Invoke() });
             if (action == "CanStart")
                 return JsonSerializer.Serialize(new { Version = 1, Accepted = true,
-                    Ready = work == null && !busy() && safe() && character() != 0
+                    Ready = StartBlockReason() == null
                         && canStart?.Invoke(request.GetProperty("Kind").GetString() ?? "") == true });
             if (action == "Start")
             {
-                if (work != null || busy() || !safe() || character() == 0)
-                    return Reply(false, "Worker is busy or character cannot start safely");
+                if (StartBlockReason() is { } blocked) return Reply(false, blocked);
                 var nextKind = request.GetProperty("Kind").GetString() ?? "";
                 var nextWork = create(nextKind, request.TryGetProperty("Arguments", out var args) ? args : default);
                 work = nextWork; kind = nextKind; token = Guid.NewGuid().ToString("N"); owner = character();

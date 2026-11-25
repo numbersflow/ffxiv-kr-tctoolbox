@@ -100,7 +100,7 @@ internal static class AutomationGate
     /// <returns><see langword="true"/>＝現在<b>不</b>該動手。</returns>
     public static bool TryGetBusyReason(out string reason) => TryGetBusyReason(out reason, false);
 
-    public static bool TryGetBusyReason(out string reason, bool allowMountedTravel)
+    public static bool TryGetBusyReason(out string reason, bool allowMountedTravel, bool allowDivingTravel = false)
     {
         reason = string.Empty;
 
@@ -181,7 +181,7 @@ internal static class AutomationGate
         //    工作、把「跳過 24 格」寫進記錄，不如當成「現在不是好時機」等下一輪。
         // Workflow visits travel home first; Lifestream lands and dismounts before any crop interaction.
         if ((!allowMountedTravel && (Svc.Condition[ConditionFlag.Mounted] || Svc.Condition[ConditionFlag.InFlight])) ||
-            Svc.Condition[ConditionFlag.Diving])
+            (!allowDivingTravel && Svc.Condition[ConditionFlag.Diving]))
         {
             reason = "騎乘／飛行／潛水中";
             return true;

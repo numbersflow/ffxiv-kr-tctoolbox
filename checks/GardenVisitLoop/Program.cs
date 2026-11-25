@@ -131,6 +131,11 @@ foreach(var blocked in new[]{Dalamud.Game.ClientState.Conditions.ConditionFlag.I
     VisitDriver.SetConditions(blocked);
     Check(VisitDriver.TryGetBusyReason(out _,allowMountedTravel:true),"Travel admission retains the safety gate for "+blocked);
 }
+VisitDriver.SetConditions(Dalamud.Game.ClientState.Conditions.ConditionFlag.Diving);
+Check(!VisitDriver.TryGetBusyReason(out _,allowMountedTravel:true,allowDivingTravel:true) && VisitDriver.TryGetBusyReason(out _),
+    "A garden visit may start its house teleport underwater while crop interaction stays blocked");
+VisitDriver.SetConditions(Dalamud.Game.ClientState.Conditions.ConditionFlag.Diving,Dalamud.Game.ClientState.Conditions.ConditionFlag.Fishing);
+Check(VisitDriver.TryGetBusyReason(out _,allowMountedTravel:true,allowDivingTravel:true),"Active fishing blocks the garden handoff even underwater");
 VisitDriver.SetConditions();
 VisitDriver TimedCross() {
     var d=new VisitDriver();

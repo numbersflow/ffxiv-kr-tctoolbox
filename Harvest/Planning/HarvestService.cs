@@ -103,7 +103,8 @@ internal sealed partial class HarvestService : IDisposable
             () => JsonSerializer.Serialize(new { Available = owner != 0, Character = owner, Items = Reservations() }), "{\"Available\":false}"));
         endpoint = new(Svc.PluginInterface, Svc.Framework, "Harvest", CreateWork,
             () => Svc.ClientState.IsLoggedIn && !AutomationGate.TryGetBusyReason(out _, allowMountedTravel: true),
-            () => visit != null || garden.IsBusy || routeRecording?.Active == true, () => Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0);
+            () => visit != null || garden.IsBusy || routeRecording?.Active == true, () => Svc.ClientState.IsLoggedIn ? Svc.PlayerState.ContentId : 0,
+            startBlockReason: () => AutomationGate.TryGetBusyReason(out var reason, allowMountedTravel: true, allowDivingTravel: true) ? reason : null);
         Svc.Framework.Update += Refresh;
         Svc.Framework.Update += RecordRoutePosition;
     }
