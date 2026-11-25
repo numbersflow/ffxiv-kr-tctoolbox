@@ -411,7 +411,10 @@ Check(CropNameMatching.Resolve("붉은 옛 장미가", new Dictionary<string, ui
 Check(CropNameMatching.Resolve("알 수 없는 꽃이", new Dictionary<string, uint> { ["꽃"] = 1 }) == 0, "Unknown crop text must not match a name fragment.");
 using (var game = new Lumina.GameData(@"C:\Program Files (x86)\FINAL FANTASY XIV - KOREA\game\sqpack",
     new Lumina.LuminaOptions { PanicOnSheetChecksumMismatch = false, DefaultExcelLanguage = (Lumina.Data.Language)7 })) {
+    var catalogTimer = System.Diagnostics.Stopwatch.StartNew();
     var catalog = new Catalog(game.GetExcelSheet<Lumina.Excel.Sheets.Item>(), game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>());
+    Console.WriteLine($"Garden catalog: {catalogTimer.Elapsed.TotalMilliseconds:F1} ms, {catalog.Crops.Count} crops, {catalog.SeedCrops.Count} seeds");
+    Check(catalog.Names.GetValueOrDefault(16026u) == game.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRow(16026).Name.ExtractText() && catalog.Names.GetValueOrDefault(uint.MaxValue) == null, "Soil names and missing item fallback remain available");
     typeof(Svc).GetProperty("Log")!.SetValue(null,System.Reflection.DispatchProxy.Create<Dalamud.Plugin.Services.IPluginLog,ConfigSaveProxy>());
     typeof(GardenCropData).GetMethod("EnsureBuilt",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!
         .Invoke(null,[game.GetExcelSheet<Lumina.Excel.Sheets.Item>(),game.GetExcelSheet<Lumina.Excel.Sheets.GardeningSeed>()]);

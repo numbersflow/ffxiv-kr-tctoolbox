@@ -15,7 +15,18 @@ internal sealed class Catalog
     public Dictionary<uint, Crop> Crops { get; } = [];
     public Dictionary<uint, uint> SeedCrops { get; } = [];
     public List<Cross> Crosses { get; } = [];
-    public Dictionary<uint, string> Names { get; } = [];
+    internal sealed class ItemNames(IReadOnlyDictionary<uint, Item> items)
+    {
+        private readonly Dictionary<uint, string> names = [];
+        public string this[uint id] => GetValueOrDefault(id) ?? throw new KeyNotFoundException();
+        public string? GetValueOrDefault(uint id)
+        {
+            if (names.TryGetValue(id, out var name)) return name;
+            if (!items.TryGetValue(id, out var item)) return null;
+            return names[id] = item.Name.ExtractText();
+        }
+    }
+    public ItemNames Names { get; }
     private static string Resource(string suffix)
     {
         var assembly = Assembly.GetExecutingAssembly();
@@ -27,7 +38,7 @@ internal sealed class Catalog
     internal Catalog(IEnumerable<Item> sourceItems, IEnumerable<GardeningSeed> sourceSeeds)
     {
         var items = sourceItems.ToDictionary(i => i.RowId);
-        foreach (var item in items.Values) Names[item.RowId] = item.Name.ExtractText();
+        Names = new(items);
         var rows = sourceSeeds;
         var seedForRow = items.Values.Where(i => i.FilterGroup == 20 && i.ItemUICategory.RowId == 82)
             .ToDictionary(i => i.AdditionalData.RowId, i => i.RowId);
